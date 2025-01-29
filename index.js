@@ -1,8 +1,8 @@
+import express from "express"
 import TelegramBot from "node-telegram-bot-api"
 import axios from "axios"
 import { stringify } from "csv-stringify/sync"
 import dotenv from "dotenv"
-import http from "http"
 
 dotenv.config()
 
@@ -10,9 +10,10 @@ const AUTHORIZED_USERS = process.env.AUTHORIZED_USERS
   ? process.env.AUTHORIZED_USERS.split(",").map((id) => Number.parseInt(id.trim()))
   : []
 const DUNE_POLL_INTERVAL = 5000 // 5 seconds
-const DUNE_MAX_RETRIES = 20 // Increased from 10 to 20
+const DUNE_MAX_RETRIES = 20
 const DUNE_TIMEOUT = 300000 // 5 minutes
 
+const app = express()
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN)
 const PORT = process.env.PORT || 8000
 
@@ -23,17 +24,12 @@ function isAuthorized(userId) {
 const queryQueue = []
 let isProcessingQueue = false
 
-async function startBot() {
-  try {
-    await bot.deleteWebHook()
-    console.log("Previous webhook deleted")
-    await bot.startPolling({ polling: true })
-    console.log("Cabal bot polling started...")
-  } catch (error) {
-    console.error("Error starting bot:", error)
-    setTimeout(startBot, 10000) // Retry after 10 seconds
-  }
-}
+app.use(express.json())
+
+app.post(`/bot${process.env.TELEGRAM_BOT_TOKEN}`, (req, res) => {
+  bot.processUpdate(req.body)
+  res.sendStatus(200)
+})
 
 bot.onText(/\/cabal/, async (msg) => {
   const chatId = msg.chat.id
@@ -165,42 +161,21 @@ async function queryDune(addresses) {
   }
 }
 
-// Simple health check server
-const server = http.createServer((req, res) => {
-  if (req.url === "/health") {
-    res.writeHead(200, { "Content-Type": "text/plain" })
-    res.end("OK")
-  } else {
-    res.writeHead(404, { "Content-Type": "text/plain" })
-    res.end("Not Found")
-  }
+app.get("/health", (req, res) => {
+  res.status(200).send("OK")
 })
 
-server.listen(PORT, () => {
-  console.log(`Health check server running on port ${PORT}`)
+const server = app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`)
+  bot.setWebHook(`${process.env.WEBHOOK_URL}/bot${process.env.TELEGRAM_BOT_TOKEN}`)
 })
-
-console.log("Cabal bot is created...")
-startBot()
 
 // Graceful shutdown
 process.on("SIGTERM", () => {
   console.log("SIGTERM signal received. Closing server...")
   server.close(() => {
     console.log("Server closed.")
-    bot.stopPolling()
-    console.log("Cabal bot polling stopped...")
     process.exit(0)
   })
-})
-
-// Error handling for polling errors
-bot.on("polling_error", (error) => {
-  console.log("Polling error:", error.message)
-  if (error.message.includes("ETELEGRAM: 409 Conflict")) {
-    console.log("Conflict detected. Restarting bot...")
-    bot.stopPolling()
-    setTimeout(startBot, 5000) // Wait for 5 seconds before restarting
-  }
 })
 
