@@ -2,12 +2,30 @@ import TelegramBot from 'node-telegram-bot-api';
 import axios from 'axios';
 import { stringify } from 'csv-stringify/sync';
 import dotenv from 'dotenv';
+import http from 'http';
 
 dotenv.config();
 
-const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true });
-const DUNE_API_KEY = process.env.DUNE_API_KEY;
-const QUERY_ID = process.env.QUERY_ID;
+// Create bot with polling disabled to avoid multiple instance conflicts
+const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { 
+  polling: true,
+  // Add error handling for polling
+  onlyFirstMatch: true,
+  request: {
+    retryAfter: 5000
+  }
+});
+
+// Create a simple HTTP server for health checks
+const server = http.createServer((req, res) => {
+  res.writeHead(200);
+  res.end('Health check passed');
+});
+
+// Listen on port 8000 (required by Koyeb)
+server.listen(8000, () => {
+  console.log('Health check server running on port 8000');
+});
 
 bot.onText(/\/coresight/, async (msg) => {
   const chatId = msg.chat.id;
@@ -40,11 +58,11 @@ async function queryDune(addresses) {
     params[`Token_${index + 1}`] = address;
   });
 
-  const response = await axios.post(`https://api.dune.com/api/v1/query/${QUERY_ID}/execute`, {
+  const response = await axios.post(`https://api.dune.com/api/v1/query/${process.env.QUERY_ID}/execute`, {
     query_parameters: params
   }, {
     headers: {
-      'x-dune-api-key': DUNE_API_KEY
+      'x-dune-api-key': process.env.DUNE_API_KEY
     }
   });
 
@@ -54,5 +72,16 @@ async function queryDune(addresses) {
 
   return response.data.result.rows;
 }
+
+// Handle errors gracefully
+bot.on('polling_error', (error) => {
+  console.log('Polling error:', error.message);
+  // If the error is a conflict, wait before reconnecting
+  if (error.code === 'ETELEGRAM' && error.message.includes('Conflict')) {
+    setTimeout(() => {
+      bot.startPolling();
+    }, 10000);
+  }
+});
 
 console.log('Coresight bot is running...');
