@@ -1,4 +1,3 @@
-import express from "express"
 import TelegramBot from "node-telegram-bot-api"
 import axios from "axios"
 import { stringify } from "csv-stringify/sync"
@@ -13,20 +12,15 @@ const DUNE_POLL_INTERVAL = 2000 // 2 seconds
 const DUNE_MAX_RETRIES = 10
 const DUNE_TIMEOUT = 180000 // 3 minutes
 
-const app = express()
-const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN)
+const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true })
 const PORT = process.env.PORT || 8000
 
 function isAuthorized(userId) {
   return AUTHORIZED_USERS.includes(userId)
 }
 
-app.use(express.json())
-
-app.post(`/bot8197465764:AAFXptudEwy5un6fgF3tWwOTcnWk0q3p8Po`, (req, res) => {
-  bot.processUpdate(req.body)
-  res.sendStatus(200)
-})
+const queryQueue = []
+let isProcessingQueue = false
 
 bot.onText(/\/cabal/, async (msg) => {
   const chatId = msg.chat.id
@@ -52,31 +46,48 @@ bot.onText(/\/cabal/, async (msg) => {
 
     bot.sendMessage(chatId, "Processing your request. Please wait...")
 
-    try {
-      const result = await queryDune(addresses)
-      if (result.length === 0) {
-        bot.sendMessage(chatId, "No results found for the given addresses.")
-      } else {
-        const csv = stringify(result, { header: true })
-        const buffer = Buffer.from(csv, "utf8")
-        bot.sendDocument(
-          chatId,
-          buffer,
-          {
-            filename: "cabal_results.csv",
-            caption: "Here are your Cabal results:",
-          },
-          {
-            contentType: "text/csv",
-          },
-        )
-      }
-    } catch (error) {
-      bot.sendMessage(chatId, `Error: ${error.message}`)
-      console.error("Dune API Error:", error)
+    queryQueue.push({ chatId, addresses })
+    if (!isProcessingQueue) {
+      processQueue()
     }
   })
 })
+
+async function processQueue() {
+  if (queryQueue.length === 0) {
+    isProcessingQueue = false
+    return
+  }
+
+  isProcessingQueue = true
+  const { chatId, addresses } = queryQueue.shift()
+
+  try {
+    const result = await queryDune(addresses)
+    if (result.length === 0) {
+      bot.sendMessage(chatId, "No results found for the given addresses.")
+    } else {
+      const csv = stringify(result, { header: true })
+      const buffer = Buffer.from(csv, "utf8")
+      bot.sendDocument(
+        chatId,
+        buffer,
+        {
+          filename: "cabal_results.csv",
+          caption: "Here are your Cabal results:",
+        },
+        {
+          contentType: "text/csv",
+        },
+      )
+    }
+  } catch (error) {
+    bot.sendMessage(chatId, `Error: ${error.message}`)
+    console.error("Dune API Error:", error)
+  }
+
+  processQueue()
+}
 
 async function queryDune(addresses) {
   const params = {}
@@ -141,16 +152,48 @@ async function queryDune(addresses) {
   }
 }
 
-const server = app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`)
-  bot.setWebHook(`${process.env.WEBHOOK_URL}/bot8197465764:AAFXptudEwy5un6fgF3tWwOTcnWk0q3p8Po`)
+// Simple health check server
+import http from "http"
+
+const server = http.createServer((req, res) => {
+  if (req.url === "/health") {
+    res.writeHead(200, { "Content-Type": "text/plain" })
+    res.end("OK")
+  } else {
+    res.writeHead(404, { "Content-Type": "text/plain" })
+    res.end("Not Found")
+  }
 })
+
+server.listen(PORT, () => {
+  console.log(`Health check server running on port ${PORT}`)
+})
+
+console.log("Cabal bot is created...")
+console.log("Cabal bot polling started...")
 
 // Graceful shutdown
 process.on("SIGTERM", () => {
   console.log("SIGTERM signal received. Closing server...")
   server.close(() => {
     console.log("Server closed.")
+    bot.stopPolling()
+    console.log("Cabal bot polling stopped...")
   })
+})
+
+// Error handling for polling errors
+bot.on("polling_error", (error) => {
+  console.log("Polling error:", error.message)
+  if (error.message.includes("ETELEGRAM: 409 Conflict")) {
+    console.log("Conflict detected. Stopping polling...")
+    bot.stopPolling()
+    console.log("Cabal bot polling stopped...")
+    console.log("Attempting to restart polling...")
+    setTimeout(() => {
+      bot.startPolling()
+      console.log("Cabal bot polling started...")
+    }, 5000) // Wait for 5 seconds before restarting
+  }
 })
 
