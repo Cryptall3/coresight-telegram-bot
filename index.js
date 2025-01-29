@@ -6,52 +6,61 @@ import http from "http"
 
 dotenv.config()
 
-const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, {
-  polling: true,
-  onlyFirstMatch: true,
-  request: {
-    retryAfter: 5000,
-  },
-})
+let botInstance = null
 
-const server = http.createServer((req, res) => {
-  res.writeHead(200)
-  res.end("Health check passed")
-})
+function createBot() {
+  if (botInstance) {
+    botInstance.stopPolling()
+  }
 
-server.listen(8000, () => {
-  console.log("Health check server running on port 8000")
-})
+  botInstance = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, {
+    polling: true,
+  })
 
-bot.onText(/\/cabal/, async (msg) => {
-  const chatId = msg.chat.id
-  bot.sendMessage(chatId, "Please enter 1-5 Solana token addresses, separated by spaces:")
-
-  bot.once("text", async (tokenMsg) => {
-    const addresses = tokenMsg.text.split(" ")
-    if (addresses.length < 1 || addresses.length > 5) {
-      bot.sendMessage(chatId, "Please enter between 1 and 5 token addresses.")
-      return
-    }
-
-    try {
-      const result = await queryDune(addresses)
-      if (result.length === 0) {
-        bot.sendMessage(chatId, "No results found for the given addresses.")
-        return
-      }
-      const csv = stringify(result, { header: true })
-
-      bot.sendDocument(chatId, Buffer.from(csv), {
-        filename: "cabal_results.csv",
-        caption: "Here are your Cabal results:",
-      })
-    } catch (error) {
-      bot.sendMessage(chatId, `Error: ${error.message}`)
-      console.error("Dune API Error:", error)
+  botInstance.on("polling_error", (error) => {
+    console.log("Polling error:", error.message)
+    if (error.code === "ETELEGRAM" && error.message.includes("Conflict")) {
+      console.log("Conflict detected. Restarting bot...")
+      setTimeout(createBot, 10000)
     }
   })
-})
+
+  botInstance.onText(/\/cabal/, async (msg) => {
+    const chatId = msg.chat.id
+    botInstance.sendMessage(chatId, "Please enter 1-5 Solana token addresses, separated by spaces:")
+
+    botInstance.once("text", async (tokenMsg) => {
+      if (tokenMsg.text.startsWith("/")) {
+        return // Ignore if it's a command
+      }
+
+      const addresses = tokenMsg.text.split(" ")
+      if (addresses.length < 1 || addresses.length > 5) {
+        botInstance.sendMessage(chatId, "Please enter between 1 and 5 token addresses.")
+        return
+      }
+
+      try {
+        const result = await queryDune(addresses)
+        if (result.length === 0) {
+          botInstance.sendMessage(chatId, "No results found for the given addresses.")
+          return
+        }
+        const csv = stringify(result, { header: true })
+
+        botInstance.sendDocument(chatId, Buffer.from(csv), {
+          filename: "cabal_results.csv",
+          caption: "Here are your Cabal results:",
+        })
+      } catch (error) {
+        botInstance.sendMessage(chatId, `Error: ${error.message}`)
+        console.error("Dune API Error:", error)
+      }
+    })
+  })
+
+  console.log("Cabal bot is running...")
+}
 
 async function queryDune(addresses, retries = 3, timeout = 120000) {
   const params = {}
@@ -79,7 +88,7 @@ async function queryDune(addresses, retries = 3, timeout = 120000) {
 
     if (response.data.state === "QUERY_STATE_COMPLETED") {
       return response.data.result.rows
-    } else if (response.data.state === "QUERY_STATE_PENDING" || response.data.state === "QUERY_STATE_EXECUTING") {
+    } else if (["QUERY_STATE_PENDING", "QUERY_STATE_EXECUTING"].includes(response.data.state)) {
       if (Date.now() - startTime > timeout) {
         throw new Error("Query execution timed out. Please try again later.")
       }
@@ -106,14 +115,13 @@ async function queryDune(addresses, retries = 3, timeout = 120000) {
   }
 }
 
-bot.on("polling_error", (error) => {
-  console.log("Polling error:", error.message)
-  if (error.code === "ETELEGRAM" && error.message.includes("Conflict")) {
-    setTimeout(() => {
-      bot.startPolling()
-    }, 10000)
-  }
+const server = http.createServer((req, res) => {
+  res.writeHead(200)
+  res.end("Health check passed")
 })
 
-console.log("Cabal bot is running...")
+server.listen(8000, () => {
+  console.log("Health check server running on port 8000")
+  createBot()
+})
 
