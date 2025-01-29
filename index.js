@@ -36,6 +36,10 @@ bot.onText(/\/cabal/, async (msg) => {
 
     try {
       const result = await queryDune(addresses)
+      if (result.length === 0) {
+        bot.sendMessage(chatId, "No results found for the given addresses.")
+        return
+      }
       const csv = stringify(result, { header: true })
 
       bot.sendDocument(chatId, Buffer.from(csv), {
@@ -49,11 +53,13 @@ bot.onText(/\/cabal/, async (msg) => {
   })
 })
 
-async function queryDune(addresses) {
+async function queryDune(addresses, retries = 3, timeout = 120000) {
   const params = {}
   addresses.forEach((address, index) => {
     params[`Token_${index + 1}`] = address
   })
+
+  const startTime = Date.now()
 
   try {
     console.log("Sending request to Dune API with params:", JSON.stringify(params))
@@ -73,17 +79,30 @@ async function queryDune(addresses) {
 
     if (response.data.state === "QUERY_STATE_COMPLETED") {
       return response.data.result.rows
-    } else if (response.data.state === "QUERY_STATE_PENDING") {
-      // If the query is still pending, wait and try again
-      console.log("Query is pending. Waiting before retrying...")
-      await new Promise((resolve) => setTimeout(resolve, 10000))
-      return queryDune(addresses)
+    } else if (response.data.state === "QUERY_STATE_PENDING" || response.data.state === "QUERY_STATE_EXECUTING") {
+      if (Date.now() - startTime > timeout) {
+        throw new Error("Query execution timed out. Please try again later.")
+      }
+      if (retries > 0) {
+        console.log(
+          `Query is ${response.data.state.toLowerCase()}. Retrying in 10 seconds... (${retries} retries left)`,
+        )
+        await new Promise((resolve) => setTimeout(resolve, 10000))
+        return queryDune(addresses, retries - 1, timeout - (Date.now() - startTime))
+      } else {
+        throw new Error("Query execution timed out. Please try again later.")
+      }
     } else {
       throw new Error(`Unexpected query state: ${response.data.state}`)
     }
   } catch (error) {
     console.error("Dune API Error:", error.response ? JSON.stringify(error.response.data) : error.message)
-    throw new Error("Failed to execute Dune query. Please try again later.")
+    if (retries > 0 && Date.now() - startTime <= timeout) {
+      console.log(`Error occurred. Retrying in 5 seconds... (${retries} retries left)`)
+      await new Promise((resolve) => setTimeout(resolve, 5000))
+      return queryDune(addresses, retries - 1, timeout - (Date.now() - startTime))
+    }
+    throw new Error("Failed to execute Dune query after multiple attempts. Please try again later.")
   }
 }
 
