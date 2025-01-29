@@ -1,0 +1,15 @@
+{
+  "name": "coresight-telegram-bot",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "dependencies": {
+    "axios": "^0.27.2",
+    "csv-stringify": "^6.2.0",
+    "dotenv": "^16.0.3",
+    "node-telegram-bot-api": "^0.59.0"
+  }
+}
