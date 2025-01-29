@@ -3,6 +3,7 @@ import TelegramBot from "node-telegram-bot-api"
 import axios from "axios"
 import { stringify } from "csv-stringify/sync"
 import dotenv from "dotenv"
+import { Readable } from "stream"
 
 dotenv.config()
 
@@ -78,9 +79,11 @@ async function processQueue() {
     } else {
       const csv = stringify(result, { header: true })
       const buffer = Buffer.from(csv, "utf8")
+      const stream = Readable.from(buffer)
+
       bot.sendDocument(
         chatId,
-        buffer,
+        stream,
         {
           filename: "data.csv",
           caption: "Here are your Cabal results:",
