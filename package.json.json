@@ -2,14 +2,9 @@
   "name": "coresight-telegram-bot",
   "version": "1.0.0",
   "type": "module",
-  "main": "bot.js",
-  "engines": {
-    "node": "20.x",
-    "npm": "10.x"
-  },
+  "main": "index.js",
   "scripts": {
-    "start": "node bot.js",
-    "build": "npm install"
+    "start": "node index.js"
   },
   "dependencies": {
     "axios": "^1.7.9",
