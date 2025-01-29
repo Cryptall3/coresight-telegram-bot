@@ -8,6 +8,7 @@ dotenv.config()
 
 let botInstance = null
 let isPolling = false
+let pollInterval = null
 
 function createBot() {
   if (botInstance) {
@@ -22,9 +23,7 @@ function createBot() {
     console.log("Polling error:", error.message)
     if (error.code === "ETELEGRAM" && error.message.includes("Conflict")) {
       console.log("Conflict detected. Stopping polling...")
-      botInstance.stopPolling()
-      isPolling = false
-      setTimeout(startPolling, 30000) // Wait 30 seconds before trying to poll again
+      stopPolling()
     }
   })
 
@@ -70,10 +69,37 @@ function startPolling() {
     botInstance.startPolling()
     isPolling = true
     console.log("Cabal bot polling started...")
+
+    // Set up interval to check and restart polling if needed
+    pollInterval = setInterval(() => {
+      if (!isPolling) {
+        console.log("Polling stopped unexpectedly. Restarting...")
+        botInstance.startPolling()
+        isPolling = true
+      }
+    }, 60000) // Check every minute
   }
 }
 
-// Attempt to query Dune API with a 5-minute timeout
+function stopPolling() {
+  if (isPolling) {
+    botInstance.stopPolling()
+    isPolling = false
+    console.log("Cabal bot polling stopped...")
+
+    if (pollInterval) {
+      clearInterval(pollInterval)
+      pollInterval = null
+    }
+
+    // Attempt to restart polling after a delay
+    setTimeout(() => {
+      console.log("Attempting to restart polling...")
+      startPolling()
+    }, 30000) // Wait 30 seconds before attempting to restart
+  }
+}
+
 async function queryDune(addresses, retries = 5, timeout = 300000) {
   const params = {}
   addresses.forEach((address, index) => {
@@ -106,9 +132,9 @@ async function queryDune(addresses, retries = 5, timeout = 300000) {
       }
       if (retries > 0) {
         console.log(
-          `Query is ${response.data.state.toLowerCase()}. Retrying in 15 seconds... (${retries} retries left)`,
+          `Query is ${response.data.state.toLowerCase()}. Retrying in 30 seconds... (${retries} retries left)`,
         )
-        await new Promise((resolve) => setTimeout(resolve, 15000))
+        await new Promise((resolve) => setTimeout(resolve, 30000))
         return queryDune(addresses, retries - 1, timeout - (Date.now() - startTime))
       } else {
         throw new Error("Query execution timed out. Please try again later.")
@@ -119,8 +145,8 @@ async function queryDune(addresses, retries = 5, timeout = 300000) {
   } catch (error) {
     console.error("Dune API Error:", error.response ? JSON.stringify(error.response.data) : error.message)
     if (retries > 0 && Date.now() - startTime <= timeout) {
-      console.log(`Error occurred. Retrying in 10 seconds... (${retries} retries left)`)
-      await new Promise((resolve) => setTimeout(resolve, 10000))
+      console.log(`Error occurred. Retrying in 30 seconds... (${retries} retries left)`)
+      await new Promise((resolve) => setTimeout(resolve, 30000))
       return queryDune(addresses, retries - 1, timeout - (Date.now() - startTime))
     }
     throw new Error("Failed to execute Dune query after multiple attempts. Please try again later.")
@@ -145,7 +171,7 @@ process.on("SIGTERM", () => {
     console.log("HTTP server closed.")
   })
   if (botInstance) {
-    botInstance.stopPolling()
+    stopPolling()
   }
 })
 
