@@ -11,5 +11,17 @@
     "csv-stringify": "^6.2.0",
     "dotenv": "^16.0.3",
     "node-telegram-bot-api": "^0.66.0"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Cryptall3/coresight-telegram-bot.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Cryptall3/coresight-telegram-bot/issues"
+  },
+  "homepage": "https://github.com/Cryptall3/coresight-telegram-bot#readme",
+  "description": ""
 }
