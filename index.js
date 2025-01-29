@@ -4,25 +4,26 @@ import { stringify } from "csv-stringify/sync"
 import dotenv from "dotenv"
 import http from "http"
 
-// Whitelist of authorized user IDs
+dotenv.config()
+
 const AUTHORIZED_USERS = process.env.AUTHORIZED_USERS
   ? process.env.AUTHORIZED_USERS.split(",").map((id) => Number.parseInt(id.trim()))
   : []
-
-// Function to check if a user is authorized
-function isAuthorized(userId) {
-  return AUTHORIZED_USERS.includes(userId)
-}
-
-dotenv.config()
+const POLLING_COOLDOWN = 60000 // 1 minute cooldown
+const DUNE_POLL_INTERVAL = 2000 // 2 seconds
+const DUNE_MAX_RETRIES = 10
+const DUNE_TIMEOUT = 180000 // 3 minutes
 
 let botInstance = null
 let isPolling = false
 let pollInterval = null
 let lastPollingAttempt = 0
-const POLLING_COOLDOWN = 60000 // 1 minute cooldown
 const queryQueue = []
 let isProcessingQueue = false
+
+function isAuthorized(userId) {
+  return AUTHORIZED_USERS.includes(userId)
+}
 
 function createBot() {
   if (botInstance) {
@@ -63,11 +64,9 @@ function createBot() {
         return
       }
 
-      // Add query to queue
       queryQueue.push({ chatId, addresses })
       botInstance.sendMessage(chatId, "Your request has been queued. Please wait...")
 
-      // Start processing queue if not already processing
       if (!isProcessingQueue) {
         processQueue()
       }
@@ -92,7 +91,6 @@ function startPolling() {
         isPolling = false
       })
 
-    // Set up interval to check and restart polling if needed
     if (!pollInterval) {
       pollInterval = setInterval(() => {
         if (!isPolling) {
@@ -117,7 +115,6 @@ function stopPolling() {
       pollInterval = null
     }
 
-    // Attempt to restart polling after a delay
     setTimeout(() => {
       console.log("Attempting to restart polling...")
       startPolling()
@@ -152,7 +149,7 @@ async function processQueue() {
   isProcessingQueue = false
 }
 
-async function queryDune(addresses, retries = 5, timeout = 300000) {
+async function queryDune(addresses) {
   const params = {}
   addresses.forEach((address, index) => {
     params[`Token_${index + 1}`] = address
@@ -178,8 +175,11 @@ async function queryDune(addresses, retries = 5, timeout = 300000) {
 
     const executionId = executeResponse.data.execution_id
 
-    // Poll for results
-    while (Date.now() - startTime < timeout) {
+    for (let i = 0; i < DUNE_MAX_RETRIES; i++) {
+      if (Date.now() - startTime > DUNE_TIMEOUT) {
+        throw new Error("Query execution timed out")
+      }
+
       const statusResponse = await axios.get(`https://api.dune.com/api/v1/execution/${executionId}/status`, {
         headers: {
           "x-dune-api-key": process.env.DUNE_API_KEY,
@@ -202,19 +202,13 @@ async function queryDune(addresses, retries = 5, timeout = 300000) {
         throw new Error("Query execution failed")
       }
 
-      // Wait before polling again
-      await new Promise((resolve) => setTimeout(resolve, 5000))
+      await new Promise((resolve) => setTimeout(resolve, DUNE_POLL_INTERVAL))
     }
 
-    throw new Error("Query execution timed out")
+    throw new Error("Max retries reached. Query execution incomplete.")
   } catch (error) {
     console.error("Dune API Error:", error.response ? JSON.stringify(error.response.data) : error.message)
-    if (retries > 0 && Date.now() - startTime <= timeout) {
-      console.log(`Error occurred. Retrying in 30 seconds... (${retries} retries left)`)
-      await new Promise((resolve) => setTimeout(resolve, 30000))
-      return queryDune(addresses, retries - 1, timeout - (Date.now() - startTime))
-    }
-    throw new Error("Failed to execute Dune query after multiple attempts. Please try again later.")
+    throw new Error("Failed to execute Dune query. Please try again later.")
   }
 }
 
@@ -229,7 +223,6 @@ server.listen(8000, () => {
   startPolling()
 })
 
-// Graceful shutdown
 process.on("SIGTERM", () => {
   console.log("SIGTERM signal received. Closing HTTP server and stopping bot...")
   server.close(() => {
