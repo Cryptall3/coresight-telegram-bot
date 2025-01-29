@@ -9,6 +9,8 @@ dotenv.config()
 let botInstance = null
 let isPolling = false
 let pollInterval = null
+const queryQueue = []
+let isProcessingQueue = false
 
 function createBot() {
   if (botInstance) {
@@ -42,21 +44,13 @@ function createBot() {
         return
       }
 
-      try {
-        const result = await queryDune(addresses)
-        if (result.length === 0) {
-          botInstance.sendMessage(chatId, "No results found for the given addresses.")
-          return
-        }
-        const csv = stringify(result, { header: true })
+      // Add query to queue
+      queryQueue.push({ chatId, addresses })
+      botInstance.sendMessage(chatId, "Your request has been queued. Please wait...")
 
-        botInstance.sendDocument(chatId, Buffer.from(csv), {
-          filename: "cabal_results.csv",
-          caption: "Here are your Cabal results:",
-        })
-      } catch (error) {
-        botInstance.sendMessage(chatId, `Error: ${error.message}`)
-        console.error("Dune API Error:", error)
+      // Start processing queue if not already processing
+      if (!isProcessingQueue) {
+        processQueue()
       }
     })
   })
@@ -100,6 +94,33 @@ function stopPolling() {
   }
 }
 
+async function processQueue() {
+  if (isProcessingQueue || queryQueue.length === 0) return
+
+  isProcessingQueue = true
+
+  while (queryQueue.length > 0) {
+    const { chatId, addresses } = queryQueue.shift()
+    try {
+      const result = await queryDune(addresses)
+      if (result.length === 0) {
+        botInstance.sendMessage(chatId, "No results found for the given addresses.")
+      } else {
+        const csv = stringify(result, { header: true })
+        botInstance.sendDocument(chatId, Buffer.from(csv), {
+          filename: "cabal_results.csv",
+          caption: "Here are your Cabal results:",
+        })
+      }
+    } catch (error) {
+      botInstance.sendMessage(chatId, `Error: ${error.message}`)
+      console.error("Dune API Error:", error)
+    }
+  }
+
+  isProcessingQueue = false
+}
+
 async function queryDune(addresses, retries = 5, timeout = 300000) {
   const params = {}
   addresses.forEach((address, index) => {
@@ -110,7 +131,7 @@ async function queryDune(addresses, retries = 5, timeout = 300000) {
 
   try {
     console.log("Sending request to Dune API with params:", JSON.stringify(params))
-    const response = await axios.post(
+    const executeResponse = await axios.post(
       `https://api.dune.com/api/v1/query/${process.env.QUERY_ID}/execute`,
       {
         query_parameters: params,
@@ -122,26 +143,39 @@ async function queryDune(addresses, retries = 5, timeout = 300000) {
       },
     )
 
-    console.log("Dune API response:", JSON.stringify(response.data))
+    console.log("Dune API execute response:", JSON.stringify(executeResponse.data))
 
-    if (response.data.state === "QUERY_STATE_COMPLETED") {
-      return response.data.result.rows
-    } else if (["QUERY_STATE_PENDING", "QUERY_STATE_EXECUTING"].includes(response.data.state)) {
-      if (Date.now() - startTime > timeout) {
-        throw new Error("Query execution timed out. Please try again later.")
+    const executionId = executeResponse.data.execution_id
+
+    // Poll for results
+    while (Date.now() - startTime < timeout) {
+      const statusResponse = await axios.get(`https://api.dune.com/api/v1/execution/${executionId}/status`, {
+        headers: {
+          "x-dune-api-key": process.env.DUNE_API_KEY,
+        },
+      })
+
+      console.log("Dune API status response:", JSON.stringify(statusResponse.data))
+
+      if (statusResponse.data.state === "QUERY_STATE_COMPLETED") {
+        const resultResponse = await axios.get(`https://api.dune.com/api/v1/execution/${executionId}/results`, {
+          headers: {
+            "x-dune-api-key": process.env.DUNE_API_KEY,
+          },
+        })
+
+        console.log("Dune API result response:", JSON.stringify(resultResponse.data))
+
+        return resultResponse.data.result.rows
+      } else if (statusResponse.data.state === "QUERY_STATE_FAILED") {
+        throw new Error("Query execution failed")
       }
-      if (retries > 0) {
-        console.log(
-          `Query is ${response.data.state.toLowerCase()}. Retrying in 30 seconds... (${retries} retries left)`,
-        )
-        await new Promise((resolve) => setTimeout(resolve, 30000))
-        return queryDune(addresses, retries - 1, timeout - (Date.now() - startTime))
-      } else {
-        throw new Error("Query execution timed out. Please try again later.")
-      }
-    } else {
-      throw new Error(`Unexpected query state: ${response.data.state}`)
+
+      // Wait before polling again
+      await new Promise((resolve) => setTimeout(resolve, 5000))
     }
+
+    throw new Error("Query execution timed out")
   } catch (error) {
     console.error("Dune API Error:", error.response ? JSON.stringify(error.response.data) : error.message)
     if (retries > 0 && Date.now() - startTime <= timeout) {
