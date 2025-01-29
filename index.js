@@ -82,7 +82,7 @@ async function processQueue() {
         chatId,
         buffer,
         {
-          filename: `cabal_results_${Date.now()}.csv`,
+          filename: "data.csv",
           caption: "Here are your Cabal results:",
         },
         {
