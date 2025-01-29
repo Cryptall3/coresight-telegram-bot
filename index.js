@@ -4,11 +4,23 @@ import { stringify } from "csv-stringify/sync"
 import dotenv from "dotenv"
 import http from "http"
 
+// Whitelist of authorized user IDs
+const AUTHORIZED_USERS = process.env.AUTHORIZED_USERS
+  ? process.env.AUTHORIZED_USERS.split(",").map((id) => Number.parseInt(id.trim()))
+  : []
+
+// Function to check if a user is authorized
+function isAuthorized(userId) {
+  return AUTHORIZED_USERS.includes(userId)
+}
+
 dotenv.config()
 
 let botInstance = null
 let isPolling = false
 let pollInterval = null
+let lastPollingAttempt = 0
+const POLLING_COOLDOWN = 60000 // 1 minute cooldown
 const queryQueue = []
 let isProcessingQueue = false
 
@@ -31,6 +43,13 @@ function createBot() {
 
   botInstance.onText(/\/cabal/, async (msg) => {
     const chatId = msg.chat.id
+    const userId = msg.from.id
+
+    if (!isAuthorized(userId)) {
+      botInstance.sendMessage(chatId, "Sorry, you are not authorized to use this bot.")
+      return
+    }
+
     botInstance.sendMessage(chatId, "Please enter 1-5 Solana token addresses, separated by spaces:")
 
     botInstance.once("text", async (tokenMsg) => {
@@ -59,19 +78,31 @@ function createBot() {
 }
 
 function startPolling() {
-  if (!isPolling) {
-    botInstance.startPolling()
-    isPolling = true
-    console.log("Cabal bot polling started...")
+  const now = Date.now()
+  if (!isPolling && now - lastPollingAttempt > POLLING_COOLDOWN) {
+    lastPollingAttempt = now
+    botInstance
+      .startPolling({ restart: true })
+      .then(() => {
+        isPolling = true
+        console.log("Cabal bot polling started...")
+      })
+      .catch((error) => {
+        console.error("Error starting polling:", error)
+        isPolling = false
+      })
 
     // Set up interval to check and restart polling if needed
-    pollInterval = setInterval(() => {
-      if (!isPolling) {
-        console.log("Polling stopped unexpectedly. Restarting...")
-        botInstance.startPolling()
-        isPolling = true
-      }
-    }, 60000) // Check every minute
+    if (!pollInterval) {
+      pollInterval = setInterval(() => {
+        if (!isPolling) {
+          console.log("Polling stopped unexpectedly. Attempting to restart...")
+          startPolling()
+        }
+      }, POLLING_COOLDOWN)
+    }
+  } else {
+    console.log("Skipping polling start due to cooldown or already polling")
   }
 }
 
@@ -90,7 +121,7 @@ function stopPolling() {
     setTimeout(() => {
       console.log("Attempting to restart polling...")
       startPolling()
-    }, 30000) // Wait 30 seconds before attempting to restart
+    }, POLLING_COOLDOWN)
   }
 }
 
