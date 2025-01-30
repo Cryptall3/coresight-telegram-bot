@@ -10,9 +10,9 @@ dotenv.config()
 const AUTHORIZED_USERS = process.env.AUTHORIZED_USERS
   ? process.env.AUTHORIZED_USERS.split(",").map((id) => Number.parseInt(id.trim()))
   : []
-const DUNE_POLL_INTERVAL = 5000 // 5 seconds
-const DUNE_MAX_RETRIES = 20
-const DUNE_TIMEOUT = 300000 // 5 minutes
+const DUNE_POLL_INTERVAL = 10000 // 10 seconds
+const DUNE_MAX_RETRIES = 30
+const DUNE_TIMEOUT = 600000 // 10 minutes
 const BOT_RESTART_DELAY = 10000 // 10 seconds
 
 const app = express()
@@ -153,9 +153,13 @@ async function queryDune(addresses) {
 
         console.log("Dune API result response:", JSON.stringify(resultResponse.data))
 
+        if (!resultResponse.data.result || !resultResponse.data.result.rows) {
+          throw new Error("Unexpected response format from Dune API")
+        }
+
         return resultResponse.data.result.rows
       } else if (statusResponse.data.state === "QUERY_STATE_FAILED") {
-        throw new Error("Query execution failed")
+        throw new Error(`Query execution failed: ${statusResponse.data.error || "Unknown error"}`)
       }
     }
 
@@ -216,7 +220,9 @@ async function exponentialBackoff(fn, maxRetries = 5, initialDelay = 1000) {
     } catch (error) {
       retries++
       if (retries === maxRetries) throw error
-      await new Promise((resolve) => setTimeout(resolve, initialDelay * Math.pow(2, retries)))
+      const delay = initialDelay * Math.pow(2, retries)
+      console.log(`Retrying in ${delay}ms... (Attempt ${retries} of ${maxRetries})`)
+      await new Promise((resolve) => setTimeout(resolve, delay))
     }
   }
 }
