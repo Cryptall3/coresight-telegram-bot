@@ -1,4 +1,4 @@
-const axios = require("axios")
+import axios from "axios"
 const axiosWithBackoff = axios.create({
   retry: 3,
   retryDelay: 1000,
@@ -133,5 +133,5 @@ const DUNE_MAX_RETRIES = 5
 const DUNE_TIMEOUT = 60000 // 60 seconds
 const DUNE_POLL_INTERVAL = 5000 // 5 seconds
 
-module.exports = { queryDune }
+export { queryDune }
 
