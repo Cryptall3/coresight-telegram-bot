@@ -1,12 +1,104 @@
+import express from "express"
+import http from "http"
+import TelegramBot from "node-telegram-bot-api"
 import axios from "axios"
-const axiosWithBackoff = axios.create({
-  retry: 3,
-  retryDelay: 1000,
-  shouldRetry: (error) => {
-    // Retry only if the error is a network error or a timeout error
-    return error.response === undefined || error.response.status >= 500
-  },
+import { stringify } from "csv-stringify/sync"
+import dotenv from "dotenv"
+
+dotenv.config()
+
+const AUTHORIZED_USERS = process.env.AUTHORIZED_USERS
+  ? process.env.AUTHORIZED_USERS.split(",").map((id) => Number.parseInt(id.trim()))
+  : []
+const DUNE_POLL_INTERVAL = 5000 // 5 seconds
+const DUNE_MAX_RETRIES = 20
+const DUNE_TIMEOUT = 300000 // 5 minutes
+const BOT_RESTART_DELAY = 10000 // 10 seconds
+
+const app = express()
+const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true })
+const PORT = process.env.PORT || 8000
+
+function isAuthorized(userId) {
+  return AUTHORIZED_USERS.includes(userId)
+}
+
+const queryQueue = []
+let isProcessingQueue = false
+
+app.use(express.json())
+
+app.post(`/bot${process.env.TELEGRAM_BOT_TOKEN}`, (req, res) => {
+  bot.processUpdate(req.body)
+  res.sendStatus(200)
 })
+
+bot.onText(/\/cabal/, async (msg) => {
+  const chatId = msg.chat.id
+  const userId = msg.from.id
+
+  if (!isAuthorized(userId)) {
+    bot.sendMessage(chatId, "Sorry, you are not authorized to use this bot.")
+    return
+  }
+
+  bot.sendMessage(chatId, "Please enter 1-5 Solana token addresses, separated by spaces:")
+
+  bot.once("text", async (tokenMsg) => {
+    if (tokenMsg.text.startsWith("/")) {
+      return // Ignore if it's a command
+    }
+
+    const addresses = tokenMsg.text.split(" ")
+    if (addresses.length < 1 || addresses.length > 5) {
+      bot.sendMessage(chatId, "Please enter between 1 and 5 token addresses.")
+      return
+    }
+
+    bot.sendMessage(chatId, "Processing your request. This may take a few minutes, please be patient...")
+
+    queryQueue.push({ chatId, addresses })
+    if (!isProcessingQueue) {
+      processQueue()
+    }
+  })
+})
+
+async function processQueue() {
+  if (queryQueue.length === 0) {
+    isProcessingQueue = false
+    return
+  }
+
+  isProcessingQueue = true
+  const { chatId, addresses } = queryQueue.shift()
+
+  try {
+    const result = await queryDune(addresses)
+    if (result.length === 0) {
+      bot.sendMessage(chatId, "No results found for the given addresses.")
+    } else {
+      const csv = stringify(result, { header: true })
+      const buffer = Buffer.from(csv, "utf8")
+      await bot.sendDocument(
+        chatId,
+        buffer,
+        {
+          filename: "cabal_results.csv",
+          caption: "Here are your Cabal results:",
+        },
+        {
+          contentType: "text/csv",
+        },
+      )
+    }
+  } catch (error) {
+    console.error("Dune API Error:", error)
+    bot.sendMessage(chatId, `Error: ${error.message}. Please try again later.`)
+  }
+
+  setTimeout(processQueue, 1000) // Add a small delay between processing queue items
+}
 
 async function queryDune(addresses) {
   const params = {}
@@ -61,77 +153,77 @@ async function queryDune(addresses) {
 
         console.log("Dune API result response:", JSON.stringify(resultResponse.data))
 
-        if (!resultResponse.data.result || !resultResponse.data.result.rows) {
-          throw new Error("Unexpected response format from Dune API")
-        }
-
-        // Process the data to match the desired schema exactly
-        const processedData = resultResponse.data.result.rows.map((row) => ({
-          token1_name: row.token1_name || null,
-          token1_total_pnl_percentage:
-            row.token1_total_pnl_percentage !== undefined
-              ? `${Number.parseFloat(row.token1_total_pnl_percentage).toFixed(3)}%`
-              : null,
-          token1_total_pnl_usd:
-            row.token1_total_pnl_usd !== undefined
-              ? `$${Number.parseFloat(row.token1_total_pnl_usd).toFixed(3)}`
-              : null,
-          token2_name: row.token2_name || null,
-          token2_total_pnl_percentage:
-            row.token2_total_pnl_percentage !== undefined
-              ? `${Number.parseFloat(row.token2_total_pnl_percentage).toFixed(3)}%`
-              : null,
-          token2_total_pnl_usd:
-            row.token2_total_pnl_usd !== undefined
-              ? `$${Number.parseFloat(row.token2_total_pnl_usd).toFixed(3)}`
-              : null,
-          token3_name: row.token3_name || null,
-          token3_total_pnl_percentage:
-            row.token3_total_pnl_percentage !== undefined
-              ? `${Number.parseFloat(row.token3_total_pnl_percentage).toFixed(3)}%`
-              : null,
-          token3_total_pnl_usd:
-            row.token3_total_pnl_usd !== undefined
-              ? `$${Number.parseFloat(row.token3_total_pnl_usd).toFixed(3)}`
-              : null,
-          token4_name: null,
-          token4_total_pnl_percentage: null,
-          token4_total_pnl_usd: null,
-          token5_name: null,
-          token5_total_pnl_percentage: null,
-          token5_total_pnl_usd: null,
-          total_pnl_percentage:
-            row.total_pnl_percentage !== undefined
-              ? `${Number.parseFloat(row.total_pnl_percentage).toFixed(3)}%`
-              : null,
-          total_pnl_usd: row.total_pnl_usd !== undefined ? `$${Number.parseFloat(row.total_pnl_usd).toFixed(3)}` : null,
-          trader: row.trader || null,
-        }))
-
-        return processedData
+        return resultResponse.data.result.rows
       } else if (statusResponse.data.state === "QUERY_STATE_FAILED") {
-        throw new Error(`Query execution failed: ${statusResponse.data.error || "Unknown error"}`)
+        throw new Error("Query execution failed")
       }
     }
 
     throw new Error("Max retries reached. Query execution incomplete.")
   } catch (error) {
-    console.error("Dune API Error:", error)
-    if (error.response) {
-      console.error("Error response:", JSON.stringify(error.response.data))
-      throw new Error(`Dune API error: ${error.response.status} - ${JSON.stringify(error.response.data)}`)
-    } else if (error.request) {
-      console.error("No response received:", error.request)
-      throw new Error("No response received from Dune API")
-    } else {
-      throw error
+    console.error("Dune API Error:", error.response ? JSON.stringify(error.response.data) : error.message)
+    throw new Error("Failed to execute Dune query. Please try again later.")
+  }
+}
+
+// Simple health check server
+const server = http.createServer((req, res) => {
+  if (req.url === "/health") {
+    res.writeHead(200, { "Content-Type": "text/plain" })
+    res.end("OK")
+  } else {
+    res.writeHead(404, { "Content-Type": "text/plain" })
+    res.end("Not Found")
+  }
+})
+
+server.listen(PORT, () => {
+  console.log(`Health check server running on port ${PORT}`)
+})
+
+console.log("Cabal bot is created...")
+console.log("Cabal bot polling started...")
+
+// Graceful shutdown
+process.on("SIGTERM", () => {
+  console.log("SIGTERM signal received. Closing server...")
+  server.close(() => {
+    console.log("Server closed.")
+    bot.stopPolling()
+    console.log("Cabal bot polling stopped...")
+  })
+})
+
+// Error handling for polling errors
+bot.on("polling_error", (error) => {
+  console.log("Polling error:", error.message)
+  if (error.message.includes("ETELEGRAM: 409 Conflict") || error.message.includes("ECONNRESET")) {
+    console.log("Conflict or connection reset detected. Restarting polling...")
+    bot.stopPolling()
+    setTimeout(() => {
+      bot.startPolling()
+      console.log("Cabal bot polling restarted...")
+    }, BOT_RESTART_DELAY)
+  }
+})
+
+// Implement exponential backoff for API requests
+async function exponentialBackoff(fn, maxRetries = 5, initialDelay = 1000) {
+  let retries = 0
+  while (retries < maxRetries) {
+    try {
+      return await fn()
+    } catch (error) {
+      retries++
+      if (retries === maxRetries) throw error
+      await new Promise((resolve) => setTimeout(resolve, initialDelay * Math.pow(2, retries)))
     }
   }
 }
 
-const DUNE_MAX_RETRIES = 5
-const DUNE_TIMEOUT = 60000 // 60 seconds
-const DUNE_POLL_INTERVAL = 5000 // 5 seconds
-
-export { queryDune }
+// Wrap axios requests with exponential backoff
+const axiosWithBackoff = {
+  get: (...args) => exponentialBackoff(() => axios.get(...args)),
+  post: (...args) => exponentialBackoff(() => axios.post(...args)),
+}
 
