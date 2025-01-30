@@ -20,7 +20,7 @@ function isAuthorized(userId) {
   return AUTHORIZED_USERS.includes(userId)
 }
 
-console.log("Bot is starting...")
+console.log("Application starting...")
 
 bot.onText(/\/cabal/, async (msg) => {
   const chatId = msg.chat.id
@@ -171,4 +171,18 @@ process.on("SIGTERM", () => {
 bot.on("polling_error", (error) => {
   console.log("Polling error:", error.message)
 })
+
+process.on("uncaughtException", (error) => {
+  console.error("Uncaught Exception:", error)
+  // Optionally, you might want to exit the process here
+  // process.exit(1);
+})
+
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("Unhandled Rejection at:", promise, "reason:", reason)
+  // Optionally, you might want to exit the process here
+  // process.exit(1);
+})
+
+console.log("All setup complete. Bot should be running...")
 
