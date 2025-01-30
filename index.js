@@ -2,7 +2,6 @@ import express from "express"
 import http from "http"
 import TelegramBot from "node-telegram-bot-api"
 import axios from "axios"
-import { stringify } from "csv-stringify/sync"
 import dotenv from "dotenv"
 
 dotenv.config()
@@ -78,19 +77,8 @@ async function processQueue() {
     if (result.length === 0) {
       bot.sendMessage(chatId, "No results found for the given addresses.")
     } else {
-      const csv = createCSV(result)
-      const buffer = Buffer.from(csv, "utf8")
-      await bot.sendDocument(
-        chatId,
-        buffer,
-        {
-          filename: "cabal_results.csv",
-          caption: "Here are your Cabal results:",
-        },
-        {
-          contentType: "text/csv",
-        },
-      )
+      const report = createTextReport(result)
+      await bot.sendMessage(chatId, report, { parse_mode: "Markdown" })
     }
   } catch (error) {
     console.error("Dune API Error:", error)
@@ -100,19 +88,16 @@ async function processQueue() {
   setTimeout(processQueue, 1000) // Add a small delay between processing queue items
 }
 
-function createCSV(data) {
-  const headers = ["token_name", "total_pnl_percentage", "total_pnl_usd", "trader"]
-
-  const rows = data.map((item) => [
-    item.token_name || "",
-    item.total_pnl_percentage !== null && item.total_pnl_percentage !== undefined
-      ? `${Number(item.total_pnl_percentage).toFixed(2)}%`
-      : "",
-    item.total_pnl_usd !== null && item.total_pnl_usd !== undefined ? `$${Number(item.total_pnl_usd).toFixed(2)}` : "",
-    item.trader || "",
-  ])
-
-  return stringify([headers, ...rows])
+function createTextReport(data) {
+  let report = "Cabal Results:\n\n"
+  data.forEach((item, index) => {
+    report += `Token ${index + 1}:\n`
+    report += `Name: ${item.token_name || "N/A"}\n`
+    report += `Total PNL %: ${item.total_pnl_percentage !== null && item.total_pnl_percentage !== undefined ? item.total_pnl_percentage.toFixed(2) + "%" : "N/A"}\n`
+    report += `Total PNL USD: ${item.total_pnl_usd !== null && item.total_pnl_usd !== undefined ? "$" + item.total_pnl_usd.toFixed(2) : "N/A"}\n`
+    report += `Trader: ${item.trader || "N/A"}\n\n`
+  })
+  return report
 }
 
 async function queryDune(addresses) {
