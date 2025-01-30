@@ -104,10 +104,12 @@ function createCSV(data) {
   const headers = ["token_name", "total_pnl_percentage", "total_pnl_usd", "trader"]
 
   const rows = data.map((item) => [
-    item.token_name,
-    item.total_pnl_percentage !== null ? `${item.total_pnl_percentage.toFixed(2)}%` : "",
-    item.total_pnl_usd !== null ? `$${item.total_pnl_usd.toFixed(2)}` : "",
-    item.trader,
+    item.token_name || "",
+    item.total_pnl_percentage !== null && item.total_pnl_percentage !== undefined
+      ? `${Number(item.total_pnl_percentage).toFixed(2)}%`
+      : "",
+    item.total_pnl_usd !== null && item.total_pnl_usd !== undefined ? `$${Number(item.total_pnl_usd).toFixed(2)}` : "",
+    item.trader || "",
   ])
 
   return stringify([headers, ...rows])
