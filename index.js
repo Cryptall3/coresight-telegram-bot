@@ -78,7 +78,7 @@ async function processQueue() {
     if (result.length === 0) {
       bot.sendMessage(chatId, "No results found for the given addresses.")
     } else {
-      const csv = stringify(result, { header: true })
+      const csv = createCSV(result)
       const buffer = Buffer.from(csv, "utf8")
       await bot.sendDocument(
         chatId,
@@ -98,6 +98,19 @@ async function processQueue() {
   }
 
   setTimeout(processQueue, 1000) // Add a small delay between processing queue items
+}
+
+function createCSV(data) {
+  const headers = ["token_name", "total_pnl_percentage", "total_pnl_usd", "trader"]
+
+  const rows = data.map((item) => [
+    item.token_name,
+    item.total_pnl_percentage !== null ? `${item.total_pnl_percentage.toFixed(2)}%` : "",
+    item.total_pnl_usd !== null ? `$${item.total_pnl_usd.toFixed(2)}` : "",
+    item.trader,
+  ])
+
+  return stringify([headers, ...rows])
 }
 
 async function queryDune(addresses) {
