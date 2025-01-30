@@ -1,8 +1,9 @@
+import express from "express"
+import http from "http"
 import TelegramBot from "node-telegram-bot-api"
 import axios from "axios"
 import { stringify } from "csv-stringify/sync"
 import dotenv from "dotenv"
-import http from "http"
 
 dotenv.config()
 
@@ -12,51 +13,29 @@ const AUTHORIZED_USERS = process.env.AUTHORIZED_USERS
 const DUNE_POLL_INTERVAL = 5000 // 5 seconds
 const DUNE_MAX_RETRIES = 20
 const DUNE_TIMEOUT = 300000 // 5 minutes
+const BOT_RESTART_DELAY = 10000 // 10 seconds
 
+const app = express()
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true })
 const PORT = process.env.PORT || 8000
-
-let isPolling = false
-let pollingRetries = 0
-const MAX_POLLING_RETRIES = 5
-const POLLING_RETRY_DELAY = 5000 // 5 seconds
 
 function isAuthorized(userId) {
   return AUTHORIZED_USERS.includes(userId)
 }
 
-console.log("Application starting...")
+const queryQueue = []
+let isProcessingQueue = false
 
-function startPolling() {
-  if (isPolling) return
+app.use(express.json())
 
-  isPolling = true
-  bot
-    .startPolling({ restart: true })
-    .then(() => {
-      console.log("Polling started successfully")
-      pollingRetries = 0
-    })
-    .catch((error) => {
-      console.error("Error starting polling:", error)
-      isPolling = false
-      if (pollingRetries < MAX_POLLING_RETRIES) {
-        pollingRetries++
-        console.log(`Retrying polling in ${POLLING_RETRY_DELAY / 1000} seconds...`)
-        setTimeout(startPolling, POLLING_RETRY_DELAY)
-      } else {
-        console.error("Max polling retries reached. Please check your bot configuration.")
-      }
-    })
-}
-
-startPolling()
+app.post(`/bot8197465764:AAFXptudEwy5un6fgF3tWwOTcnWk0q3p8Po`, (req, res) => {
+  bot.processUpdate(req.body)
+  res.sendStatus(200)
+})
 
 bot.onText(/\/cabal/, async (msg) => {
   const chatId = msg.chat.id
   const userId = msg.from.id
-
-  console.log(`Received /cabal command from user ${userId}`)
 
   if (!isAuthorized(userId)) {
     bot.sendMessage(chatId, "Sorry, you are not authorized to use this bot.")
@@ -76,34 +55,50 @@ bot.onText(/\/cabal/, async (msg) => {
       return
     }
 
-    bot.sendMessage(chatId, "Processing your request. Please wait...")
+    bot.sendMessage(chatId, "Processing your request. This may take a few minutes, please be patient...")
 
-    try {
-      const result = await queryDune(addresses)
-      if (result.length === 0) {
-        bot.sendMessage(chatId, "No results found for the given addresses.")
-      } else {
-        const csv = stringify(result, { header: true })
-        const buffer = Buffer.from(csv, "utf8")
-        await bot.sendDocument(
-          chatId,
-          buffer,
-          {
-            filename: "data.csv",
-            caption: "Here are your Cabal results:",
-          },
-          {
-            contentType: "text/csv",
-          },
-        )
-        console.log(`CSV sent to user ${userId}`)
-      }
-    } catch (error) {
-      bot.sendMessage(chatId, `Error: ${error.message}`)
-      console.error("Dune API Error:", error)
+    queryQueue.push({ chatId, addresses })
+    if (!isProcessingQueue) {
+      processQueue()
     }
   })
 })
+
+async function processQueue() {
+  if (queryQueue.length === 0) {
+    isProcessingQueue = false
+    return
+  }
+
+  isProcessingQueue = true
+  const { chatId, addresses } = queryQueue.shift()
+
+  try {
+    const result = await queryDune(addresses)
+    if (result.length === 0) {
+      bot.sendMessage(chatId, "No results found for the given addresses.")
+    } else {
+      const csv = stringify(result, { header: true })
+      const buffer = Buffer.from(csv, "utf8")
+      await bot.sendDocument(
+        chatId,
+        buffer,
+        {
+          filename: "cabal_results.csv",
+          caption: "Here are your Cabal results:",
+        },
+        {
+          contentType: "text/csv",
+        },
+      )
+    }
+  } catch (error) {
+    console.error("Dune API Error:", error)
+    bot.sendMessage(chatId, `Error: ${error.message}. Please try again later.`)
+  }
+
+  setTimeout(processQueue, 1000) // Add a small delay between processing queue items
+}
 
 async function queryDune(addresses) {
   const params = {}
@@ -115,7 +110,7 @@ async function queryDune(addresses) {
 
   try {
     console.log("Sending request to Dune API with params:", JSON.stringify(params))
-    const executeResponse = await axios.post(
+    const executeResponse = await axiosWithBackoff.post(
       `https://api.dune.com/api/v1/query/${process.env.QUERY_ID}/execute`,
       {
         query_parameters: params,
@@ -136,7 +131,9 @@ async function queryDune(addresses) {
         throw new Error("Query execution timed out")
       }
 
-      const statusResponse = await axios.get(`https://api.dune.com/api/v1/execution/${executionId}/status`, {
+      await new Promise((resolve) => setTimeout(resolve, DUNE_POLL_INTERVAL))
+
+      const statusResponse = await axiosWithBackoff.get(`https://api.dune.com/api/v1/execution/${executionId}/status`, {
         headers: {
           "x-dune-api-key": process.env.DUNE_API_KEY,
         },
@@ -145,11 +142,14 @@ async function queryDune(addresses) {
       console.log("Dune API status response:", JSON.stringify(statusResponse.data))
 
       if (statusResponse.data.state === "QUERY_STATE_COMPLETED") {
-        const resultResponse = await axios.get(`https://api.dune.com/api/v1/execution/${executionId}/results`, {
-          headers: {
-            "x-dune-api-key": process.env.DUNE_API_KEY,
+        const resultResponse = await axiosWithBackoff.get(
+          `https://api.dune.com/api/v1/execution/${executionId}/results`,
+          {
+            headers: {
+              "x-dune-api-key": process.env.DUNE_API_KEY,
+            },
           },
-        })
+        )
 
         console.log("Dune API result response:", JSON.stringify(resultResponse.data))
 
@@ -157,8 +157,6 @@ async function queryDune(addresses) {
       } else if (statusResponse.data.state === "QUERY_STATE_FAILED") {
         throw new Error("Query execution failed")
       }
-
-      await new Promise((resolve) => setTimeout(resolve, DUNE_POLL_INTERVAL))
     }
 
     throw new Error("Max retries reached. Query execution incomplete.")
@@ -193,32 +191,39 @@ process.on("SIGTERM", () => {
     console.log("Server closed.")
     bot.stopPolling()
     console.log("Cabal bot polling stopped...")
-    process.exit(0)
   })
 })
 
 // Error handling for polling errors
 bot.on("polling_error", (error) => {
   console.log("Polling error:", error.message)
-  if (error.message.includes("ETELEGRAM: 409 Conflict")) {
-    console.log("Conflict detected. Restarting polling...")
+  if (error.message.includes("ETELEGRAM: 409 Conflict") || error.message.includes("ECONNRESET")) {
+    console.log("Conflict or connection reset detected. Restarting polling...")
     bot.stopPolling()
-    isPolling = false
-    setTimeout(startPolling, POLLING_RETRY_DELAY)
+    setTimeout(() => {
+      bot.startPolling()
+      console.log("Cabal bot polling restarted...")
+    }, BOT_RESTART_DELAY)
   }
 })
 
-process.on("uncaughtException", (error) => {
-  console.error("Uncaught Exception:", error)
-  // Optionally, you might want to exit the process here
-  // process.exit(1)
-})
+// Implement exponential backoff for API requests
+async function exponentialBackoff(fn, maxRetries = 5, initialDelay = 1000) {
+  let retries = 0
+  while (retries < maxRetries) {
+    try {
+      return await fn()
+    } catch (error) {
+      retries++
+      if (retries === maxRetries) throw error
+      await new Promise((resolve) => setTimeout(resolve, initialDelay * Math.pow(2, retries)))
+    }
+  }
+}
 
-process.on("unhandledRejection", (reason, promise) => {
-  console.error("Unhandled Rejection at:", promise, "reason:", reason)
-  // Optionally, you might want to exit the process here
-  // process.exit(1)
-})
-
-console.log("All setup complete. Bot should be running...")
+// Wrap axios requests with exponential backoff
+const axiosWithBackoff = {
+  get: (...args) => exponentialBackoff(() => axios.get(...args)),
+  post: (...args) => exponentialBackoff(() => axios.post(...args)),
+}
 
