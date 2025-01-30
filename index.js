@@ -55,7 +55,7 @@ bot.onText(/\/cabal/, async (msg) => {
       } else {
         const csv = stringify(result, { header: true })
         const buffer = Buffer.from(csv, "utf8")
-        bot.sendDocument(
+        await bot.sendDocument(
           chatId,
           buffer,
           {
@@ -66,6 +66,7 @@ bot.onText(/\/cabal/, async (msg) => {
             contentType: "text/csv",
           },
         )
+        console.log(`CSV sent to user ${userId}`)
       }
     } catch (error) {
       bot.sendMessage(chatId, `Error: ${error.message}`)
