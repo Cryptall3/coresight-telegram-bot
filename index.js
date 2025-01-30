@@ -16,11 +16,41 @@ const DUNE_TIMEOUT = 300000 // 5 minutes
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true })
 const PORT = process.env.PORT || 8000
 
+let isPolling = false
+let pollingRetries = 0
+const MAX_POLLING_RETRIES = 5
+const POLLING_RETRY_DELAY = 5000 // 5 seconds
+
 function isAuthorized(userId) {
   return AUTHORIZED_USERS.includes(userId)
 }
 
 console.log("Application starting...")
+
+function startPolling() {
+  if (isPolling) return
+
+  isPolling = true
+  bot
+    .startPolling({ restart: true })
+    .then(() => {
+      console.log("Polling started successfully")
+      pollingRetries = 0
+    })
+    .catch((error) => {
+      console.error("Error starting polling:", error)
+      isPolling = false
+      if (pollingRetries < MAX_POLLING_RETRIES) {
+        pollingRetries++
+        console.log(`Retrying polling in ${POLLING_RETRY_DELAY / 1000} seconds...`)
+        setTimeout(startPolling, POLLING_RETRY_DELAY)
+      } else {
+        console.error("Max polling retries reached. Please check your bot configuration.")
+      }
+    })
+}
+
+startPolling()
 
 bot.onText(/\/cabal/, async (msg) => {
   const chatId = msg.chat.id
@@ -170,18 +200,24 @@ process.on("SIGTERM", () => {
 // Error handling for polling errors
 bot.on("polling_error", (error) => {
   console.log("Polling error:", error.message)
+  if (error.message.includes("ETELEGRAM: 409 Conflict")) {
+    console.log("Conflict detected. Restarting polling...")
+    bot.stopPolling()
+    isPolling = false
+    setTimeout(startPolling, POLLING_RETRY_DELAY)
+  }
 })
 
 process.on("uncaughtException", (error) => {
   console.error("Uncaught Exception:", error)
   // Optionally, you might want to exit the process here
-  // process.exit(1);
+  // process.exit(1)
 })
 
 process.on("unhandledRejection", (reason, promise) => {
   console.error("Unhandled Rejection at:", promise, "reason:", reason)
   // Optionally, you might want to exit the process here
-  // process.exit(1);
+  // process.exit(1)
 })
 
 console.log("All setup complete. Bot should be running...")
