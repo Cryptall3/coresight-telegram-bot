@@ -1,5 +1,4 @@
 import express from "express"
-import http from "http"
 import TelegramBot from "node-telegram-bot-api"
 import axios from "axios"
 import { stringify } from "csv-stringify/sync"
@@ -10,13 +9,13 @@ dotenv.config()
 const AUTHORIZED_USERS = process.env.AUTHORIZED_USERS
   ? process.env.AUTHORIZED_USERS.split(",").map((id) => Number.parseInt(id.trim()))
   : []
-const DUNE_POLL_INTERVAL = 5000 // 5 seconds
-const DUNE_MAX_RETRIES = 20
-const DUNE_TIMEOUT = 300000 // 5 minutes
-const BOT_RESTART_DELAY = 10000 // 10 seconds
+const DUNE_POLL_INTERVAL = 10000 // 10 seconds
+const DUNE_MAX_RETRIES = 30
+const DUNE_TIMEOUT = 600000 // 10 minutes
+const BOT_RESTART_DELAY = 30000 // 30 seconds
 
 const app = express()
-const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true })
+const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN)
 const PORT = process.env.PORT || 8000
 
 function isAuthorized(userId) {
@@ -28,7 +27,7 @@ let isProcessingQueue = false
 
 app.use(express.json())
 
-app.post(`/bot8197465764:AAFXptudEwy5un6fgF3tWwOTcnWk0q3p8Po`, (req, res) => {
+app.post(`/bot${process.env.TELEGRAM_BOT_TOKEN}`, (req, res) => {
   bot.processUpdate(req.body)
   res.sendStatus(200)
 })
@@ -55,7 +54,7 @@ bot.onText(/\/cabal/, async (msg) => {
       return
     }
 
-    bot.sendMessage(chatId, "Processing your request. This may take a few minutes, please be patient...")
+    bot.sendMessage(chatId, "Processing your request. This may take up to 10 minutes, please be patient...")
 
     queryQueue.push({ chatId, addresses })
     if (!isProcessingQueue) {
@@ -97,7 +96,7 @@ async function processQueue() {
     bot.sendMessage(chatId, `Error: ${error.message}. Please try again later.`)
   }
 
-  setTimeout(processQueue, 1000) // Add a small delay between processing queue items
+  setTimeout(processQueue, 5000) // Add a 5-second delay between processing queue items
 }
 
 async function queryDune(addresses) {
@@ -153,7 +152,29 @@ async function queryDune(addresses) {
 
         console.log("Dune API result response:", JSON.stringify(resultResponse.data))
 
-        return resultResponse.data.result.rows
+        // Process the data to match the desired schema
+        const processedData = resultResponse.data.result.rows.map((row) => ({
+          token1_name: row.token1_name || null,
+          token1_total_pnl_percentage: row.token1_total_pnl_percentage ? `${row.token1_total_pnl_percentage}%` : null,
+          token1_total_pnl_usd: row.token1_total_pnl_usd ? `$${row.token1_total_pnl_usd}` : null,
+          token2_name: row.token2_name || null,
+          token2_total_pnl_percentage: row.token2_total_pnl_percentage ? `${row.token2_total_pnl_percentage}%` : null,
+          token2_total_pnl_usd: row.token2_total_pnl_usd ? `$${row.token2_total_pnl_usd}` : null,
+          token3_name: row.token3_name || null,
+          token3_total_pnl_percentage: row.token3_total_pnl_percentage ? `${row.token3_total_pnl_percentage}%` : null,
+          token3_total_pnl_usd: row.token3_total_pnl_usd ? `$${row.token3_total_pnl_usd}` : null,
+          token4_name: null,
+          token4_total_pnl_percentage: null,
+          token4_total_pnl_usd: null,
+          token5_name: null,
+          token5_total_pnl_percentage: null,
+          token5_total_pnl_usd: null,
+          total_pnl_percentage: row.total_pnl_percentage ? `${row.total_pnl_percentage}%` : null,
+          total_pnl_usd: row.total_pnl_usd ? `$${row.total_pnl_usd}` : null,
+          trader: row.trader || null,
+        }))
+
+        return processedData
       } else if (statusResponse.data.state === "QUERY_STATE_FAILED") {
         throw new Error("Query execution failed")
       }
@@ -166,45 +187,17 @@ async function queryDune(addresses) {
   }
 }
 
-// Simple health check server
-const server = http.createServer((req, res) => {
-  if (req.url === "/health") {
-    res.writeHead(200, { "Content-Type": "text/plain" })
-    res.end("OK")
-  } else {
-    res.writeHead(404, { "Content-Type": "text/plain" })
-    res.end("Not Found")
-  }
+const server = app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`)
+  bot.setWebHook(`${process.env.WEBHOOK_URL}/bot${process.env.TELEGRAM_BOT_TOKEN}`)
 })
-
-server.listen(PORT, () => {
-  console.log(`Health check server running on port ${PORT}`)
-})
-
-console.log("Cabal bot is created...")
-console.log("Cabal bot polling started...")
 
 // Graceful shutdown
 process.on("SIGTERM", () => {
   console.log("SIGTERM signal received. Closing server...")
   server.close(() => {
     console.log("Server closed.")
-    bot.stopPolling()
-    console.log("Cabal bot polling stopped...")
   })
-})
-
-// Error handling for polling errors
-bot.on("polling_error", (error) => {
-  console.log("Polling error:", error.message)
-  if (error.message.includes("ETELEGRAM: 409 Conflict") || error.message.includes("ECONNRESET")) {
-    console.log("Conflict or connection reset detected. Restarting polling...")
-    bot.stopPolling()
-    setTimeout(() => {
-      bot.startPolling()
-      console.log("Cabal bot polling restarted...")
-    }, BOT_RESTART_DELAY)
-  }
 })
 
 // Implement exponential backoff for API requests
@@ -226,4 +219,6 @@ const axiosWithBackoff = {
   get: (...args) => exponentialBackoff(() => axios.get(...args)),
   post: (...args) => exponentialBackoff(() => axios.post(...args)),
 }
+
+console.log("Cabal bot is created and webhook is set...")
 
