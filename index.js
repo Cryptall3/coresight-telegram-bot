@@ -1,11 +1,8 @@
-import express from "express"
 import TelegramBot from "node-telegram-bot-api"
 import axios from "axios"
 import { stringify } from "csv-stringify/sync"
 import dotenv from "dotenv"
-import fs from "fs"
-import path from "path"
-import os from "os"
+import http from "http"
 
 dotenv.config()
 
@@ -16,27 +13,20 @@ const DUNE_POLL_INTERVAL = 5000 // 5 seconds
 const DUNE_MAX_RETRIES = 20
 const DUNE_TIMEOUT = 300000 // 5 minutes
 
-const app = express()
-const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN)
+const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true })
 const PORT = process.env.PORT || 8000
 
 function isAuthorized(userId) {
   return AUTHORIZED_USERS.includes(userId)
 }
 
-const queryQueue = []
-let isProcessingQueue = false
-
-app.use(express.json())
-
-app.post(`/bot${process.env.TELEGRAM_BOT_TOKEN}`, (req, res) => {
-  bot.processUpdate(req.body)
-  res.sendStatus(200)
-})
+console.log("Bot is starting...")
 
 bot.onText(/\/cabal/, async (msg) => {
   const chatId = msg.chat.id
   const userId = msg.from.id
+
+  console.log(`Received /cabal command from user ${userId}`)
 
   if (!isAuthorized(userId)) {
     bot.sendMessage(chatId, "Sorry, you are not authorized to use this bot.")
@@ -58,46 +48,31 @@ bot.onText(/\/cabal/, async (msg) => {
 
     bot.sendMessage(chatId, "Processing your request. Please wait...")
 
-    queryQueue.push({ chatId, addresses })
-    if (!isProcessingQueue) {
-      processQueue()
+    try {
+      const result = await queryDune(addresses)
+      if (result.length === 0) {
+        bot.sendMessage(chatId, "No results found for the given addresses.")
+      } else {
+        const csv = stringify(result, { header: true })
+        const buffer = Buffer.from(csv, "utf8")
+        bot.sendDocument(
+          chatId,
+          buffer,
+          {
+            filename: "data.csv",
+            caption: "Here are your Cabal results:",
+          },
+          {
+            contentType: "text/csv",
+          },
+        )
+      }
+    } catch (error) {
+      bot.sendMessage(chatId, `Error: ${error.message}`)
+      console.error("Dune API Error:", error)
     }
   })
 })
-
-async function processQueue() {
-  if (queryQueue.length === 0) {
-    isProcessingQueue = false
-    return
-  }
-
-  isProcessingQueue = true
-  const { chatId, addresses } = queryQueue.shift()
-
-  try {
-    const result = await queryDune(addresses)
-    if (result.length === 0) {
-      bot.sendMessage(chatId, "No results found for the given addresses.")
-    } else {
-      const csv = stringify(result, { header: true })
-      const tempFilePath = path.join(os.tmpdir(), "data.csv")
-      fs.writeFileSync(tempFilePath, csv)
-
-      await bot.sendDocument(chatId, tempFilePath, {
-        caption: "Here are your Cabal results:",
-        filename: "data.csv",
-        contentType: "text/csv",
-      })
-
-      fs.unlinkSync(tempFilePath) // Delete the temporary file
-    }
-  } catch (error) {
-    bot.sendMessage(chatId, `Error: ${error.message}`)
-    console.error("Dune API Error:", error)
-  }
-
-  processQueue()
-}
 
 async function queryDune(addresses) {
   const params = {}
@@ -162,21 +137,37 @@ async function queryDune(addresses) {
   }
 }
 
-app.get("/health", (req, res) => {
-  res.status(200).send("OK")
+// Simple health check server
+const server = http.createServer((req, res) => {
+  if (req.url === "/health") {
+    res.writeHead(200, { "Content-Type": "text/plain" })
+    res.end("OK")
+  } else {
+    res.writeHead(404, { "Content-Type": "text/plain" })
+    res.end("Not Found")
+  }
 })
 
-const server = app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`)
-  bot.setWebHook(`${process.env.WEBHOOK_URL}/bot${process.env.TELEGRAM_BOT_TOKEN}`)
+server.listen(PORT, () => {
+  console.log(`Health check server running on port ${PORT}`)
 })
+
+console.log("Cabal bot is created...")
+console.log("Cabal bot polling started...")
 
 // Graceful shutdown
 process.on("SIGTERM", () => {
   console.log("SIGTERM signal received. Closing server...")
   server.close(() => {
     console.log("Server closed.")
+    bot.stopPolling()
+    console.log("Cabal bot polling stopped...")
     process.exit(0)
   })
+})
+
+// Error handling for polling errors
+bot.on("polling_error", (error) => {
+  console.log("Polling error:", error.message)
 })
 
