@@ -152,25 +152,32 @@ async function queryDune(addresses) {
 
         console.log("Dune API result response:", JSON.stringify(resultResponse.data))
 
-        // Process the data to match the desired schema
+        // Process the data to match the desired schema exactly
         const processedData = resultResponse.data.result.rows.map((row) => ({
           token1_name: row.token1_name || null,
-          token1_total_pnl_percentage: row.token1_total_pnl_percentage ? `${row.token1_total_pnl_percentage}%` : null,
-          token1_total_pnl_usd: row.token1_total_pnl_usd ? `$${row.token1_total_pnl_usd}` : null,
+          token1_total_pnl_percentage:
+            row.token1_total_pnl_percentage !== undefined ? `${row.token1_total_pnl_percentage.toFixed(3)}%` : null,
+          token1_total_pnl_usd:
+            row.token1_total_pnl_usd !== undefined ? `$${row.token1_total_pnl_usd.toFixed(3)}` : null,
           token2_name: row.token2_name || null,
-          token2_total_pnl_percentage: row.token2_total_pnl_percentage ? `${row.token2_total_pnl_percentage}%` : null,
-          token2_total_pnl_usd: row.token2_total_pnl_usd ? `$${row.token2_total_pnl_usd}` : null,
+          token2_total_pnl_percentage:
+            row.token2_total_pnl_percentage !== undefined ? `${row.token2_total_pnl_percentage.toFixed(3)}%` : null,
+          token2_total_pnl_usd:
+            row.token2_total_pnl_usd !== undefined ? `$${row.token2_total_pnl_usd.toFixed(3)}` : null,
           token3_name: row.token3_name || null,
-          token3_total_pnl_percentage: row.token3_total_pnl_percentage ? `${row.token3_total_pnl_percentage}%` : null,
-          token3_total_pnl_usd: row.token3_total_pnl_usd ? `$${row.token3_total_pnl_usd}` : null,
+          token3_total_pnl_percentage:
+            row.token3_total_pnl_percentage !== undefined ? `${row.token3_total_pnl_percentage.toFixed(3)}%` : null,
+          token3_total_pnl_usd:
+            row.token3_total_pnl_usd !== undefined ? `$${row.token3_total_pnl_usd.toFixed(3)}` : null,
           token4_name: null,
           token4_total_pnl_percentage: null,
           token4_total_pnl_usd: null,
           token5_name: null,
           token5_total_pnl_percentage: null,
           token5_total_pnl_usd: null,
-          total_pnl_percentage: row.total_pnl_percentage ? `${row.total_pnl_percentage}%` : null,
-          total_pnl_usd: row.total_pnl_usd ? `$${row.total_pnl_usd}` : null,
+          total_pnl_percentage:
+            row.total_pnl_percentage !== undefined ? `${row.total_pnl_percentage.toFixed(3)}%` : null,
+          total_pnl_usd: row.total_pnl_usd !== undefined ? `$${row.total_pnl_usd.toFixed(3)}` : null,
           trader: row.trader || null,
         }))
 
