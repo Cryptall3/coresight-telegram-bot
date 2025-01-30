@@ -3,7 +3,9 @@ import TelegramBot from "node-telegram-bot-api"
 import axios from "axios"
 import { stringify } from "csv-stringify/sync"
 import dotenv from "dotenv"
-import { Readable } from "stream"
+import fs from "fs"
+import path from "path"
+import os from "os"
 
 dotenv.config()
 
@@ -78,20 +80,16 @@ async function processQueue() {
       bot.sendMessage(chatId, "No results found for the given addresses.")
     } else {
       const csv = stringify(result, { header: true })
-      const buffer = Buffer.from(csv, "utf8")
-      const stream = Readable.from(buffer)
+      const tempFilePath = path.join(os.tmpdir(), "data.csv")
+      fs.writeFileSync(tempFilePath, csv)
 
-      bot.sendDocument(
-        chatId,
-        stream,
-        {
-          filename: "data.csv",
-          caption: "Here are your Cabal results:",
-        },
-        {
-          contentType: "text/csv",
-        },
-      )
+      await bot.sendDocument(chatId, tempFilePath, {
+        caption: "Here are your Cabal results:",
+        filename: "data.csv",
+        contentType: "text/csv",
+      })
+
+      fs.unlinkSync(tempFilePath) // Delete the temporary file
     }
   } catch (error) {
     bot.sendMessage(chatId, `Error: ${error.message}`)
