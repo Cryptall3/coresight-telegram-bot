@@ -97,16 +97,31 @@ async function processQueue() {
 }
 
 function createCSVReport(data) {
-  const header = ["Token Name", "Total PNL %", "Total PNL USD", "Trader"]
+  if (data.length === 0) {
+    return "No data available"
+  }
 
-  const rows = data.map((item) => [
-    item.token_name || "N/A",
-    item.total_pnl_percentage || "N/A",
-    item.total_pnl_usd || "N/A",
-    item.trader || "N/A",
-  ])
+  // Get all unique keys from the data
+  const allKeys = [...new Set(data.flatMap(Object.keys))]
 
-  return stringify([header, ...rows])
+  // Create header row
+  const header = allKeys
+
+  // Create data rows
+  const rows = data.map((item) =>
+    allKeys.map((key) => {
+      if (typeof item[key] === "number") {
+        // Format numbers to 2 decimal places
+        return item[key].toFixed(2)
+      }
+      return item[key] || "" // Use empty string for missing values
+    }),
+  )
+
+  // Combine header and rows
+  const csvData = [header, ...rows]
+
+  return stringify(csvData)
 }
 
 async function queryDune(addresses) {
