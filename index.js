@@ -93,8 +93,8 @@ function createTextReport(data) {
   data.forEach((item, index) => {
     report += `Token ${index + 1}:\n`
     report += `Name: ${item.token_name || "N/A"}\n`
-    report += `Total PNL %: ${item.total_pnl_percentage !== null && item.total_pnl_percentage !== undefined ? item.total_pnl_percentage.toFixed(2) + "%" : "N/A"}\n`
-    report += `Total PNL USD: ${item.total_pnl_usd !== null && item.total_pnl_usd !== undefined ? "$" + item.total_pnl_usd.toFixed(2) : "N/A"}\n`
+    report += `Total PNL %: ${item.total_pnl_percentage || "N/A"}\n`
+    report += `Total PNL USD: ${item.total_pnl_usd || "N/A"}\n`
     report += `Trader: ${item.trader || "N/A"}\n\n`
   })
   return report
