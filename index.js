@@ -257,3 +257,14 @@ const axiosWithBackoff = {
   post: (...args) => exponentialBackoff(() => axios.post(...args)),
 }
 
+bot.onText(/\/start/, (msg) => {
+  const chatId = msg.chat.id
+  const welcomeMessage = `Welcome to CORESIGHT! your gateway to deep insight and analysis using blockchain data!
+
+To use the CABAL WALLET FINDER, enter /cabal
+
+More comands coming, stay tuned!`
+
+  bot.sendMessage(chatId, welcomeMessage)
+})
+
