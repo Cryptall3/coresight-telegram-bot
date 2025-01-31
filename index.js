@@ -3,6 +3,8 @@ import http from "http"
 import TelegramBot from "node-telegram-bot-api"
 import axios from "axios"
 import dotenv from "dotenv"
+import { stringify } from "csv-stringify/sync"
+import fs from "fs"
 
 dotenv.config()
 
@@ -77,8 +79,14 @@ async function processQueue() {
     if (result.length === 0) {
       bot.sendMessage(chatId, "No results found for the given addresses.")
     } else {
-      const report = createTextReport(result)
-      await bot.sendMessage(chatId, report, { parse_mode: "Markdown" })
+      const csvContent = createCSVReport(result)
+      const fileName = `cabal_results_${Date.now()}.csv`
+      fs.writeFileSync(fileName, csvContent)
+
+      await bot.sendDocument(chatId, fileName, { caption: "Cabal Results" })
+
+      // Delete the file after sending
+      fs.unlinkSync(fileName)
     }
   } catch (error) {
     console.error("Dune API Error:", error)
@@ -88,16 +96,17 @@ async function processQueue() {
   setTimeout(processQueue, 1000) // Add a small delay between processing queue items
 }
 
-function createTextReport(data) {
-  let report = "Cabal Results:\n\n"
-  data.forEach((item, index) => {
-    report += `Token ${index + 1}:\n`
-    report += `Name: ${item.token_name || "N/A"}\n`
-    report += `Total PNL %: ${item.total_pnl_percentage || "N/A"}\n`
-    report += `Total PNL USD: ${item.total_pnl_usd || "N/A"}\n`
-    report += `Trader: ${item.trader || "N/A"}\n\n`
-  })
-  return report
+function createCSVReport(data) {
+  const header = ["Token Name", "Total PNL %", "Total PNL USD", "Trader"]
+
+  const rows = data.map((item) => [
+    item.token_name || "N/A",
+    item.total_pnl_percentage || "N/A",
+    item.total_pnl_usd || "N/A",
+    item.trader || "N/A",
+  ])
+
+  return stringify([header, ...rows])
 }
 
 async function queryDune(addresses) {
