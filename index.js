@@ -291,18 +291,21 @@ More comands coming, stay tuned!`
 })
 
 // Add this new command handler near your other command handlers
+// Removed /getgroupid command for security
+/*
 bot.onText(/\/getgroupid (.+)/, (msg, match) => {
-  const chatId = msg.chat.id
-  const userId = msg.from.id
-  const passphrase = match[1]
-
-  if (userId === 600010222 && passphrase === "C0r3S1ghtS3cur3P@ss") {
-    bot.sendMessage(chatId, `The ID of this chat is: ${chatId}`)
-    console.log(`Group ID request from chat: ${chatId}`)
+  const chatId = msg.chat.id;
+  const userId = msg.from.id;
+  const passphrase = match[1];
+  
+  if (userId === 600010222 && passphrase === 'C0r3S1ghtS3cur3P@ss') {
+    bot.sendMessage(chatId, `The ID of this chat is: ${chatId}`);
+    console.log(`Group ID request from chat: ${chatId}`);
   } else {
-    bot.sendMessage(chatId, "You are not authorized to use this command.")
+    bot.sendMessage(chatId, "You are not authorized to use this command.");
   }
-})
+});
+*/
 
 console.log("Cabal bot is created and polling started...")
 
