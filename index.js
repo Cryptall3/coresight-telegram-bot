@@ -8,9 +8,7 @@ import fs from "fs"
 
 dotenv.config()
 
-const AUTHORIZED_USERS = process.env.AUTHORIZED_USERS
-  ? process.env.AUTHORIZED_USERS.split(",").map((id) => Number.parseInt(id.trim()))
-  : []
+const AUTHORIZED_GROUP_ID = process.env.AUTHORIZED_GROUP_ID // Add this to your Koyeb environment variables
 const DUNE_POLL_INTERVAL = 10000 // 10 seconds
 const DUNE_MAX_RETRIES = 30
 const DUNE_TIMEOUT = 600000 // 10 minutes
@@ -20,8 +18,14 @@ const app = express()
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true })
 const PORT = process.env.PORT || 8000
 
-function isAuthorized(userId) {
-  return AUTHORIZED_USERS.includes(userId)
+async function isGroupMember(userId) {
+  try {
+    const chatMember = await bot.getChatMember(AUTHORIZED_GROUP_ID, userId)
+    return ["creator", "administrator", "member"].includes(chatMember.status)
+  } catch (error) {
+    console.error("Error checking group membership:", error)
+    return false
+  }
 }
 
 const queryQueue = []
@@ -34,12 +38,30 @@ app.post(`/bot${process.env.TELEGRAM_BOT_TOKEN}`, (req, res) => {
   res.sendStatus(200)
 })
 
+bot.onText(/\/start/, async (msg) => {
+  const chatId = msg.chat.id
+  const userId = msg.from.id
+
+  if (!(await isGroupMember(userId))) {
+    bot.sendMessage(chatId, "Sorry, you are not authorized to use this bot. Please join our group to get access.")
+    return
+  }
+
+  const welcomeMessage = `Welcome to CORESIGHT! Your gateway to deep insight and analysis using blockchain data!
+
+To use the CABAL WALLET FINDER, enter /cabal
+
+More commands coming, stay tuned!`
+
+  bot.sendMessage(chatId, welcomeMessage)
+})
+
 bot.onText(/\/cabal/, async (msg) => {
   const chatId = msg.chat.id
   const userId = msg.from.id
 
-  if (!isAuthorized(userId)) {
-    bot.sendMessage(chatId, "Sorry, you are not authorized to use this bot.")
+  if (!(await isGroupMember(userId))) {
+    bot.sendMessage(chatId, "Sorry, you are not authorized to use this bot. Please join our group to get access.")
     return
   }
 
@@ -267,4 +289,20 @@ More comands coming, stay tuned!`
 
   bot.sendMessage(chatId, welcomeMessage)
 })
+
+// Add this new command handler near your other command handlers
+bot.onText(/\/getgroupid (.+)/, (msg, match) => {
+  const chatId = msg.chat.id
+  const userId = msg.from.id
+  const passphrase = match[1]
+
+  if (userId === 600010222 && passphrase === "C0r3S1ghtS3cur3P@ss") {
+    bot.sendMessage(chatId, `The ID of this chat is: ${chatId}`)
+    console.log(`Group ID request from chat: ${chatId}`)
+  } else {
+    bot.sendMessage(chatId, "You are not authorized to use this command.")
+  }
+})
+
+console.log("Cabal bot is created and polling started...")
 
