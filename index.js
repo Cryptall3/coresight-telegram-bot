@@ -8,7 +8,7 @@ import fs from "fs"
 
 dotenv.config()
 
-const AUTHORIZED_GROUP_ID = process.env.AUTHORIZED_GROUP_ID // Add this to your Koyeb environment variables
+const AUTHORIZED_GROUP_ID = process.env.AUTHORIZED_GROUP_ID
 const DUNE_POLL_INTERVAL = 10000 // 10 seconds
 const DUNE_MAX_RETRIES = 30
 const DUNE_TIMEOUT = 600000 // 10 minutes
@@ -18,7 +18,7 @@ const app = express()
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true })
 const PORT = process.env.PORT || 8000
 
-async function isGroupMember(userId) {
+async function isAuthorizedUser(userId) {
   try {
     const chatMember = await bot.getChatMember(AUTHORIZED_GROUP_ID, userId)
     return ["creator", "administrator", "member"].includes(chatMember.status)
@@ -42,16 +42,20 @@ bot.onText(/\/start/, async (msg) => {
   const chatId = msg.chat.id
   const userId = msg.from.id
 
-  if (!(await isGroupMember(userId))) {
-    bot.sendMessage(chatId, "Sorry, you are not authorized to use this bot. Please join our group to get access.")
+  if (!(await isAuthorizedUser(userId))) {
+    bot.sendMessage(
+      chatId,
+      "Sorry, you are not authorized to use this bot. Please join our authorized group to get access.",
+    )
     return
   }
 
-  const welcomeMessage = `Welcome to CORESIGHT! Your gateway to deep insight and analysis using blockchain data!
+  const welcomeMessage = `Welcome to CORESIGHT! your gateway to deep insight and analysis using blockchain data!
 
 To use the CABAL WALLET FINDER, enter /cabal
+To use the 30D WALLET PNL FINDER, enter /walletpnl
 
-More commands coming, stay tuned!`
+More comands coming, stay tuned!`
 
   bot.sendMessage(chatId, welcomeMessage)
 })
@@ -60,8 +64,11 @@ bot.onText(/\/cabal/, async (msg) => {
   const chatId = msg.chat.id
   const userId = msg.from.id
 
-  if (!(await isGroupMember(userId))) {
-    bot.sendMessage(chatId, "Sorry, you are not authorized to use this bot. Please join our group to get access.")
+  if (!(await isAuthorizedUser(userId))) {
+    bot.sendMessage(
+      chatId,
+      "Sorry, you are not authorized to use this bot. Please join our authorized group to get access.",
+    )
     return
   }
 
@@ -80,7 +87,37 @@ bot.onText(/\/cabal/, async (msg) => {
 
     bot.sendMessage(chatId, "Processing your request. This may take a few minutes, please be patient...")
 
-    queryQueue.push({ chatId, addresses })
+    queryQueue.push({ chatId, type: "cabal", data: addresses })
+    if (!isProcessingQueue) {
+      processQueue()
+    }
+  })
+})
+
+bot.onText(/\/walletpnl/, async (msg) => {
+  const chatId = msg.chat.id
+  const userId = msg.from.id
+
+  if (!(await isAuthorizedUser(userId))) {
+    bot.sendMessage(
+      chatId,
+      "Sorry, you are not authorized to use this bot. Please join our authorized group to get access.",
+    )
+    return
+  }
+
+  bot.sendMessage(chatId, "Please enter a Solana wallet address:")
+
+  bot.once("text", async (walletMsg) => {
+    if (walletMsg.text.startsWith("/")) {
+      return // Ignore if it's a command
+    }
+
+    const walletAddress = walletMsg.text.trim()
+
+    bot.sendMessage(chatId, "Processing your request. This may take a few minutes, please be patient...")
+
+    queryQueue.push({ chatId, type: "walletpnl", data: walletAddress })
     if (!isProcessingQueue) {
       processQueue()
     }
@@ -94,18 +131,24 @@ async function processQueue() {
   }
 
   isProcessingQueue = true
-  const { chatId, addresses } = queryQueue.shift()
+  const { chatId, type, data } = queryQueue.shift()
 
   try {
-    const result = await queryDune(addresses)
+    let result
+    if (type === "cabal") {
+      result = await queryDune(data)
+    } else if (type === "walletpnl") {
+      result = await queryDuneWalletPNL(data)
+    }
+
     if (result.length === 0) {
-      bot.sendMessage(chatId, "No results found for the given addresses.")
+      bot.sendMessage(chatId, "No results found for the given input.")
     } else {
       const csvContent = createCSVReport(result)
-      const fileName = `cabal_results_${Date.now()}.csv`
+      const fileName = `${type}_results_${Date.now()}.csv`
       fs.writeFileSync(fileName, csvContent)
 
-      await bot.sendDocument(chatId, fileName, { caption: "Cabal Results" })
+      await bot.sendDocument(chatId, fileName, { caption: `${type.toUpperCase()} Results` })
 
       // Delete the file after sending
       fs.unlinkSync(fileName)
@@ -152,12 +195,24 @@ async function queryDune(addresses) {
     params[`Token_${index + 1}`] = address
   })
 
+  return await executeDuneQuery(process.env.QUERY_ID, params)
+}
+
+async function queryDuneWalletPNL(walletAddress) {
+  const params = {
+    wallet_address: walletAddress,
+  }
+
+  return await executeDuneQuery("4184506", params)
+}
+
+async function executeDuneQuery(queryId, params) {
   const startTime = Date.now()
 
   try {
-    console.log("Sending request to Dune API with params:", JSON.stringify(params))
+    console.log(`Sending request to Dune API for query ${queryId} with params:`, JSON.stringify(params))
     const executeResponse = await axiosWithBackoff.post(
-      `https://api.dune.com/api/v1/query/${process.env.QUERY_ID}/execute`,
+      `https://api.dune.com/api/v1/query/${queryId}/execute`,
       {
         query_parameters: params,
       },
@@ -278,34 +333,6 @@ const axiosWithBackoff = {
   get: (...args) => exponentialBackoff(() => axios.get(...args)),
   post: (...args) => exponentialBackoff(() => axios.post(...args)),
 }
-
-bot.onText(/\/start/, (msg) => {
-  const chatId = msg.chat.id
-  const welcomeMessage = `Welcome to CORESIGHT! your gateway to deep insight and analysis using blockchain data!
-
-To use the CABAL WALLET FINDER, enter /cabal
-
-More comands coming, stay tuned!`
-
-  bot.sendMessage(chatId, welcomeMessage)
-})
-
-// Add this new command handler near your other command handlers
-// Removed /getgroupid command for security
-/*
-bot.onText(/\/getgroupid (.+)/, (msg, match) => {
-  const chatId = msg.chat.id;
-  const userId = msg.from.id;
-  const passphrase = match[1];
-  
-  if (userId === 600010222 && passphrase === 'C0r3S1ghtS3cur3P@ss') {
-    bot.sendMessage(chatId, `The ID of this chat is: ${chatId}`);
-    console.log(`Group ID request from chat: ${chatId}`);
-  } else {
-    bot.sendMessage(chatId, "You are not authorized to use this command.");
-  }
-});
-*/
 
 console.log("Cabal bot is created and polling started...")
 
