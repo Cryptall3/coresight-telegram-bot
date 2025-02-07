@@ -20,7 +20,8 @@ const PORT = process.env.PORT || 8000
 
 async function isAuthorizedUser(userId) {
   try {
-    const chatMember = await bot.getChatMember(AUTHORIZED_GROUP_ID, userId)
+    const chat = await bot.getChat(AUTHORIZED_GROUP_ID)
+    const chatMember = await bot.getChatMember(chat.id, userId)
     console.log(`Authorization check for user ${userId}: ${chatMember.status}`)
     return ["creator", "administrator", "member"].includes(chatMember.status)
   } catch (error) {
@@ -130,7 +131,10 @@ bot.onText(/\/checkaccess/, async (msg) => {
   const userId = msg.from.id
 
   try {
-    const chatMember = await bot.getChatMember(AUTHORIZED_GROUP_ID, userId)
+    const chat = await bot.getChat(AUTHORIZED_GROUP_ID)
+    bot.sendMessage(chatId, `Authorized group info:\nID: ${chat.id}\nType: ${chat.type}\nTitle: ${chat.title}`)
+
+    const chatMember = await bot.getChatMember(chat.id, userId)
     bot.sendMessage(chatId, `Your status in the authorized group is: ${chatMember.status}`)
     console.log(`User ${userId} status check: ${chatMember.status}`)
   } catch (error) {
