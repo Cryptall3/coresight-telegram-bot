@@ -20,10 +20,36 @@ const PORT = process.env.PORT || 8000
 
 async function isAuthorizedUser(userId) {
   try {
-    const chatMember = await bot.getChatMember(AUTHORIZED_GROUP_ID, userId)
-    return ["creator", "administrator", "member"].includes(chatMember.status)
+    console.log(`Checking authorization for user ${userId}`)
+    console.log(`Current AUTHORIZED_GROUP_ID: ${AUTHORIZED_GROUP_ID}`)
+
+    let chatMember
+    try {
+      chatMember = await bot.getChatMember(AUTHORIZED_GROUP_ID, userId)
+    } catch (error) {
+      console.error(`Error getting chat member with current AUTHORIZED_GROUP_ID: ${error.message}`)
+
+      // Try with -100 prefix if not already present
+      if (!AUTHORIZED_GROUP_ID.startsWith("-100")) {
+        const alternativeGroupId = `-100${AUTHORIZED_GROUP_ID.replace("-", "")}`
+        console.log(`Trying alternative group ID: ${alternativeGroupId}`)
+        try {
+          chatMember = await bot.getChatMember(alternativeGroupId, userId)
+        } catch (innerError) {
+          console.error(`Error getting chat member with alternative group ID: ${innerError.message}`)
+        }
+      }
+    }
+
+    if (chatMember) {
+      console.log(`Authorization check for user ${userId}: ${chatMember.status}`)
+      return ["creator", "administrator", "member"].includes(chatMember.status)
+    } else {
+      console.log(`Unable to get chat member status for user ${userId}`)
+      return false
+    }
   } catch (error) {
-    console.error("Error checking group membership:", error)
+    console.error(`Error checking group membership for user ${userId}:`, error)
     return false
   }
 }
@@ -122,6 +148,31 @@ bot.onText(/\/walletpnl/, async (msg) => {
       processQueue()
     }
   })
+})
+
+bot.onText(/\/checkaccess/, async (msg) => {
+  const chatId = msg.chat.id
+  const userId = msg.from.id
+
+  try {
+    const isAuthorized = await isAuthorizedUser(userId)
+    bot.sendMessage(chatId, `Authorization check result: ${isAuthorized ? "Authorized" : "Not authorized"}`)
+    bot.sendMessage(chatId, `Current AUTHORIZED_GROUP_ID: ${AUTHORIZED_GROUP_ID}`)
+    bot.sendMessage(chatId, `Your user ID: ${userId}`)
+    bot.sendMessage(chatId, `Current chat ID: ${chatId}`)
+    console.log(
+      `Access check for user ${userId} in chat ${chatId}. Result: ${isAuthorized ? "Authorized" : "Not authorized"}`,
+    )
+  } catch (error) {
+    bot.sendMessage(chatId, `Error checking your status: ${error.message}`)
+    console.error(`Error checking status for user ${userId}:`, error)
+  }
+})
+
+bot.onText(/\/checkgroupid/, (msg) => {
+  const chatId = msg.chat.id
+  bot.sendMessage(chatId, `The current chat ID is: ${chatId}`)
+  console.log(`Chat ID check requested. Chat ID: ${chatId}`)
 })
 
 async function processQueue() {
