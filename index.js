@@ -18,21 +18,12 @@ const app = express()
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true })
 const PORT = process.env.PORT || 8000
 
-async function isAuthorizedUser(userId, chatId) {
+async function isAuthorizedUser(userId) {
   try {
-    // Check if the message is from the authorized group
-    if (chatId.toString() === AUTHORIZED_GROUP_ID) {
-      const chatMember = await bot.getChatMember(AUTHORIZED_GROUP_ID, userId)
-      console.log(`Group authorization check for user ${userId}: ${chatMember.status}`)
-      return ["creator", "administrator", "member"].includes(chatMember.status)
-    }
-
-    // If it's a direct message, check if the user is a member of the authorized group
     const chatMember = await bot.getChatMember(AUTHORIZED_GROUP_ID, userId)
-    console.log(`Direct message authorization check for user ${userId}: ${chatMember.status}`)
     return ["creator", "administrator", "member"].includes(chatMember.status)
   } catch (error) {
-    console.error(`Error checking group membership for user ${userId}:`, error)
+    console.error("Error checking group membership:", error)
     return false
   }
 }
@@ -51,7 +42,7 @@ bot.onText(/\/start/, async (msg) => {
   const chatId = msg.chat.id
   const userId = msg.from.id
 
-  if (!(await isAuthorizedUser(userId, chatId))) {
+  if (!(await isAuthorizedUser(userId))) {
     bot.sendMessage(
       chatId,
       "Sorry, you are not authorized to use this bot. Please join our authorized group to get access.",
@@ -73,7 +64,7 @@ bot.onText(/\/cabal/, async (msg) => {
   const chatId = msg.chat.id
   const userId = msg.from.id
 
-  if (!(await isAuthorizedUser(userId, chatId))) {
+  if (!(await isAuthorizedUser(userId))) {
     bot.sendMessage(
       chatId,
       "Sorry, you are not authorized to use this bot. Please join our authorized group to get access.",
@@ -107,7 +98,7 @@ bot.onText(/\/walletpnl/, async (msg) => {
   const chatId = msg.chat.id
   const userId = msg.from.id
 
-  if (!(await isAuthorizedUser(userId, chatId))) {
+  if (!(await isAuthorizedUser(userId))) {
     bot.sendMessage(
       chatId,
       "Sorry, you are not authorized to use this bot. Please join our authorized group to get access.",
@@ -131,22 +122,6 @@ bot.onText(/\/walletpnl/, async (msg) => {
       processQueue()
     }
   })
-})
-
-bot.onText(/\/checkaccess/, async (msg) => {
-  const chatId = msg.chat.id
-  const userId = msg.from.id
-
-  try {
-    const isAuthorized = await isAuthorizedUser(userId, chatId)
-    const chatMember = await bot.getChatMember(AUTHORIZED_GROUP_ID, userId)
-    bot.sendMessage(chatId, `Your status in the authorized group is: ${chatMember.status}`)
-    bot.sendMessage(chatId, `You are ${isAuthorized ? "authorized" : "not authorized"} to use this bot.`)
-    console.log(`User ${userId} status check: ${chatMember.status}, Authorized: ${isAuthorized}`)
-  } catch (error) {
-    bot.sendMessage(chatId, `Error checking your status: ${error.message}`)
-    console.error(`Error checking status for user ${userId}:`, error)
-  }
 })
 
 async function processQueue() {
