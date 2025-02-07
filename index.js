@@ -21,9 +21,10 @@ const PORT = process.env.PORT || 8000
 async function isAuthorizedUser(userId) {
   try {
     const chatMember = await bot.getChatMember(AUTHORIZED_GROUP_ID, userId)
+    console.log(`Authorization check for user ${userId}: ${chatMember.status}`)
     return ["creator", "administrator", "member"].includes(chatMember.status)
   } catch (error) {
-    console.error("Error checking group membership:", error)
+    console.error(`Error checking group membership for user ${userId}:`, error)
     return false
   }
 }
@@ -122,6 +123,20 @@ bot.onText(/\/walletpnl/, async (msg) => {
       processQueue()
     }
   })
+})
+
+bot.onText(/\/checkaccess/, async (msg) => {
+  const chatId = msg.chat.id
+  const userId = msg.from.id
+
+  try {
+    const chatMember = await bot.getChatMember(AUTHORIZED_GROUP_ID, userId)
+    bot.sendMessage(chatId, `Your status in the authorized group is: ${chatMember.status}`)
+    console.log(`User ${userId} status check: ${chatMember.status}`)
+  } catch (error) {
+    bot.sendMessage(chatId, `Error checking your status: ${error.message}`)
+    console.error(`Error checking status for user ${userId}:`, error)
+  }
 })
 
 async function processQueue() {
