@@ -21,6 +21,8 @@ const PORT = process.env.PORT || 8000
 async function isAuthorizedUser(userId) {
   try {
     const chat = await bot.getChat(AUTHORIZED_GROUP_ID)
+    console.log(`Authorized group info: ID: ${chat.id}, Type: ${chat.type}, Title: ${chat.title}`)
+
     const chatMember = await bot.getChatMember(chat.id, userId)
     console.log(`Authorization check for user ${userId}: ${chatMember.status}`)
     return ["creator", "administrator", "member"].includes(chatMember.status)
