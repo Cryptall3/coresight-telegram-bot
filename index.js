@@ -23,33 +23,24 @@ async function isAuthorizedUser(userId) {
     console.log(`Checking authorization for user ${userId}`)
     console.log(`Current AUTHORIZED_GROUP_ID: ${AUTHORIZED_GROUP_ID}`)
 
-    let chatMember
-    try {
-      chatMember = await bot.getChatMember(AUTHORIZED_GROUP_ID, userId)
-    } catch (error) {
-      console.error(`Error getting chat member with current AUTHORIZED_GROUP_ID: ${error.message}`)
+    const groupIds = [AUTHORIZED_GROUP_ID, "-1002241130402"] // Include both old and new group IDs
 
-      // Try with -100 prefix if not already present
-      if (!AUTHORIZED_GROUP_ID.startsWith("-100")) {
-        const alternativeGroupId = `-100${AUTHORIZED_GROUP_ID.replace("-", "")}`
-        console.log(`Trying alternative group ID: ${alternativeGroupId}`)
-        try {
-          chatMember = await bot.getChatMember(alternativeGroupId, userId)
-        } catch (innerError) {
-          console.error(`Error getting chat member with alternative group ID: ${innerError.message}`)
+    for (const groupId of groupIds) {
+      try {
+        const chatMember = await bot.getChatMember(groupId, userId)
+        console.log(`Authorization check for user ${userId} in group ${groupId}: ${chatMember.status}`)
+        if (["creator", "administrator", "member"].includes(chatMember.status)) {
+          return true
         }
+      } catch (error) {
+        console.error(`Error checking group membership for user ${userId} in group ${groupId}:`, error)
       }
     }
 
-    if (chatMember) {
-      console.log(`Authorization check for user ${userId}: ${chatMember.status}`)
-      return ["creator", "administrator", "member"].includes(chatMember.status)
-    } else {
-      console.log(`Unable to get chat member status for user ${userId}`)
-      return false
-    }
+    console.log(`User ${userId} is not authorized in any of the checked groups`)
+    return false
   } catch (error) {
-    console.error(`Error checking group membership for user ${userId}:`, error)
+    console.error(`Error in isAuthorizedUser for user ${userId}:`, error)
     return false
   }
 }
