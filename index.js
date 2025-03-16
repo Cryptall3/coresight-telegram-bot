@@ -315,7 +315,7 @@ async function queryDuneWalletPNL(walletAddress) {
   return await executeDuneQuery("4184506", params)
 }
 
-// Updated function to query Dune for EVM Cabal
+// Updated function to query Dune for EVM Cabal with "NULL" string for empty slots
 async function queryDuneEVMCabal(data) {
   const { blockchain, tokens } = data
   
@@ -324,12 +324,12 @@ async function queryDuneEVMCabal(data) {
     blockchain: blockchain
   }
   
-  // Add token parameters, filling unused slots with NULL
+  // Add token parameters, filling unused slots with "NULL" as a string
   for (let i = 0; i < 5; i++) {
     if (i < tokens.length) {
       params[`Token_${i + 1}`] = tokens[i]
     } else {
-      params[`Token_${i + 1}`] = null
+      params[`Token_${i + 1}`] = "NULL"  // Use "NULL" as a string instead of null
     }
   }
 
