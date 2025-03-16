@@ -274,11 +274,27 @@ async function executeDuneQuery(queryId, params) {
 // Simple health check server
 const server = http.createServer((req, res) => {
   if (req.url === "/health") {
-    res.writeHead(200, { "Content-Type": "text/plain" })
-    res.end("OK")
+    // Check if the bot is actually connected to Telegram
+    const isPolling = bot.isPolling && bot.isPolling();
+    
+    if (isPolling) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ 
+        status: "OK", 
+        timestamp: new Date().toISOString(),
+        polling: true
+      }));
+    } else {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ 
+        status: "ERROR", 
+        message: "Bot is not polling",
+        timestamp: new Date().toISOString()
+      }));
+    }
   } else {
-    res.writeHead(404, { "Content-Type": "text/plain" })
-    res.end("Not Found")
+    res.writeHead(404, { "Content-Type": "text/plain" });
+    res.end("Not Found");
   }
 })
 
