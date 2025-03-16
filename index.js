@@ -13,6 +13,8 @@ const DUNE_POLL_INTERVAL = 10000 // 10 seconds
 const DUNE_MAX_RETRIES = 30
 const DUNE_TIMEOUT = 600000 // 10 minutes
 const BOT_RESTART_DELAY = 10000 // 10 seconds
+// Define the authorized group ID for the EVM Cabal command
+const EVM_CABAL_GROUP_ID = process.env.EVM_CABAL_GROUP_ID || AUTHORIZED_GROUP_ID
 
 const app = express()
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true })
@@ -28,6 +30,17 @@ async function isAuthorizedUser(userId) {
   }
 }
 
+// Check if a user is authorized for the EVM Cabal command
+async function isAuthorizedForEVMCabal(userId) {
+  try {
+    const chatMember = await bot.getChatMember(EVM_CABAL_GROUP_ID, userId)
+    return ["creator", "administrator", "member"].includes(chatMember.status)
+  } catch (error) {
+    console.error(`Error checking EVM Cabal group membership for user ${userId}:`, error)
+    return false
+  }
+}
+
 const queryQueue = []
 let isProcessingQueue = false
 
@@ -36,6 +49,23 @@ app.use(express.json())
 app.post(`/bot${process.env.TELEGRAM_BOT_TOKEN}`, (req, res) => {
   bot.processUpdate(req.body)
   res.sendStatus(200)
+})
+
+// Add this temporary command to get group IDs
+bot.onText(/\/getgroupid/, (msg) => {
+  const chatId = msg.chat.id
+  const chatType = msg.chat.type
+  const chatTitle = msg.chat.title || "Private Chat"
+  
+  bot.sendMessage(
+    msg.chat.id,
+    `Chat Information:
+ID: ${chatId}
+Type: ${chatType}
+Title: ${chatTitle}`
+  )
+  
+  console.log(`Chat ID for "${chatTitle}": ${chatId}`)
 })
 
 bot.onText(/\/start/, async (msg) => {
@@ -54,6 +84,7 @@ bot.onText(/\/start/, async (msg) => {
 
 To use the CABAL WALLET FINDER, enter /cabal
 To use the 30D WALLET PNL FINDER, enter /walletpnl
+To use the EVM CABAL FINDER, enter /EVMCabal
 
 More comands coming, stay tuned!`
 
@@ -124,6 +155,42 @@ bot.onText(/\/walletpnl/, async (msg) => {
   })
 })
 
+// EVM Cabal command handler
+bot.onText(/\/EVMCabal/, async (msg) => {
+  const chatId = msg.chat.id
+  const userId = msg.from.id
+
+  // Check if user is authorized
+  if (!(await isAuthorizedForEVMCabal(userId))) {
+    bot.sendMessage(
+      chatId,
+      "Sorry, you are not authorized to use the EVM Cabal command. Please join our authorized group to get access."
+    )
+    return
+  }
+
+  bot.sendMessage(chatId, "Please enter 1-5 Ethereum token addresses, separated by spaces:")
+
+  bot.once("text", async (tokenMsg) => {
+    if (tokenMsg.text.startsWith("/")) {
+      return // Ignore if it's a command
+    }
+
+    const addresses = tokenMsg.text.split(" ")
+    if (addresses.length < 1 || addresses.length > 5) {
+      bot.sendMessage(chatId, "Please enter between 1 and 5 token addresses.")
+      return
+    }
+
+    bot.sendMessage(chatId, "Processing your EVM Cabal request. This may take a few minutes, please be patient...")
+
+    queryQueue.push({ chatId, type: "evmcabal", data: addresses })
+    if (!isProcessingQueue) {
+      processQueue()
+    }
+  })
+})
+
 async function processQueue() {
   if (queryQueue.length === 0) {
     isProcessingQueue = false
@@ -139,6 +206,8 @@ async function processQueue() {
       result = await queryDune(data)
     } else if (type === "walletpnl") {
       result = await queryDuneWalletPNL(data)
+    } else if (type === "evmcabal") {
+      result = await queryDuneEVMCabal(data)
     }
 
     if (result.length === 0) {
@@ -204,6 +273,17 @@ async function queryDuneWalletPNL(walletAddress) {
   }
 
   return await executeDuneQuery("4184506", params)
+}
+
+// Add this function to query Dune for EVM Cabal
+async function queryDuneEVMCabal(addresses) {
+  const params = {}
+  addresses.forEach((address, index) => {
+    params[`Token_${index + 1}`] = address
+  })
+
+  // Replace with your actual Dune query ID for EVM Cabal
+  return await executeDuneQuery(process.env.EVM_QUERY_ID, params)
 }
 
 async function executeDuneQuery(queryId, params) {
