@@ -1,27 +1,64 @@
 import express from "express"
-import http from "http"
 import TelegramBot from "node-telegram-bot-api"
 import axios from "axios"
 import dotenv from "dotenv"
 import { stringify } from "csv-stringify/sync"
 import fs from "fs"
+import http from "http"
 
 dotenv.config()
 
 const AUTHORIZED_GROUP_ID = process.env.AUTHORIZED_GROUP_ID
+const EVM_CABAL_GROUP_ID = process.env.EVM_CABAL_GROUP_ID || AUTHORIZED_GROUP_ID
 const DUNE_POLL_INTERVAL = 10000 // 10 seconds
 const DUNE_MAX_RETRIES = 30
 const DUNE_TIMEOUT = 600000 // 10 minutes
 const BOT_RESTART_DELAY = 10000 // 10 seconds
-// Define the authorized group ID for premium features
-const PREMIUM_GROUP_ID = process.env.PREMIUM_GROUP_ID || AUTHORIZED_GROUP_ID
 
 const app = express()
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true })
 const PORT = process.env.PORT || 8000
 
-// Store user conversation state
-const userConversations = {}
+// Setup health check with reference to the bot
+const server = setupHealthCheck(PORT, bot)
+
+function setupHealthCheck(port, bot) {
+  const server = http.createServer((req, res) => {
+    if (req.url === "/health") {
+      // Check if the bot is actually connected to Telegram
+      const isPolling = bot.isPolling()
+
+      if (isPolling) {
+        res.writeHead(200, { "Content-Type": "application/json" })
+        res.end(
+          JSON.stringify({
+            status: "OK",
+            timestamp: new Date().toISOString(),
+            polling: true,
+          }),
+        )
+      } else {
+        res.writeHead(503, { "Content-Type": "application/json" })
+        res.end(
+          JSON.stringify({
+            status: "ERROR",
+            message: "Bot is not polling",
+            timestamp: new Date().toISOString(),
+          }),
+        )
+      }
+    } else {
+      res.writeHead(404, { "Content-Type": "text/plain" })
+      res.end("Not Found")
+    }
+  })
+
+  server.listen(port, () => {
+    console.log(`Health check server running on port ${port}`)
+  })
+
+  return server
+}
 
 async function isAuthorizedUser(userId) {
   try {
@@ -33,13 +70,12 @@ async function isAuthorizedUser(userId) {
   }
 }
 
-// Check if a user is authorized for premium features
-async function isAuthorizedForPremium(userId) {
+async function isAuthorizedForEVMCabal(userId) {
   try {
-    const chatMember = await bot.getChatMember(PREMIUM_GROUP_ID, userId)
+    const chatMember = await bot.getChatMember(EVM_CABAL_GROUP_ID, userId)
     return ["creator", "administrator", "member"].includes(chatMember.status)
   } catch (error) {
-    console.error(`Error checking premium group membership for user ${userId}:`, error)
+    console.error(`Error checking EVM Cabal group membership for user ${userId}:`, error)
     return false
   }
 }
@@ -52,23 +88,6 @@ app.use(express.json())
 app.post(`/bot${process.env.TELEGRAM_BOT_TOKEN}`, (req, res) => {
   bot.processUpdate(req.body)
   res.sendStatus(200)
-})
-
-// Add this temporary command to get group IDs
-bot.onText(/\/getgroupid/, (msg) => {
-  const chatId = msg.chat.id
-  const chatType = msg.chat.type
-  const chatTitle = msg.chat.title || "Private Chat"
-  
-  bot.sendMessage(
-    msg.chat.id,
-    `Chat Information:
-ID: ${chatId}
-Type: ${chatType}
-Title: ${chatTitle}`
-  )
-  
-  console.log(`Chat ID for "${chatTitle}": ${chatId}`)
 })
 
 bot.onText(/\/start/, async (msg) => {
@@ -87,7 +106,7 @@ bot.onText(/\/start/, async (msg) => {
 
 To use the CABAL WALLET FINDER, enter /cabal
 To use the 30D WALLET PNL FINDER, enter /walletpnl
-To use the EVM CABAL FINDER, enter /EVMCabal
+To use the EVM CABAL WALLET FINDER, enter /EVMCabal
 
 More comands coming, stay tuned!`
 
@@ -158,77 +177,60 @@ bot.onText(/\/walletpnl/, async (msg) => {
   })
 })
 
-// EVM Cabal command handler - updated with blockchain selection
 bot.onText(/\/EVMCabal/, async (msg) => {
   const chatId = msg.chat.id
   const userId = msg.from.id
 
   // Check if user is authorized
-  if (!(await isAuthorizedForPremium(userId))) {
+  if (!(await isAuthorizedForEVMCabal(userId))) {
     bot.sendMessage(
       chatId,
-      "You need to purchase a CORESIGHT premium plan to use this command!"
+      "Sorry, you are not authorized to use the EVM Cabal command. Please join our authorized group to get access.",
     )
     return
   }
 
-  // Initialize conversation state
-  userConversations[chatId] = {
-    state: "awaiting_blockchain",
-    userId: userId
-  }
+  // Update this message to list available blockchains
+  bot.sendMessage(
+    chatId,
+    "Choose a blockchain to query on. Available Chains are: bnb, base, ethereum, arbitrum, sei, berachain, fantom, polygon, avalanche_c, linea, blast, optimism, zksync",
+  )
 
-  // Ask for blockchain first
-  bot.sendMessage(chatId, "What blockchain do you want to query on? (e.g., ethereum, arbitrum, optimism, etc.)")
-})
+  // Rest of the command handler remains the same
+  bot.once("text", async (blockchainMsg) => {
+    if (blockchainMsg.text.startsWith("/")) {
+      return // Ignore if it's a command
+    }
 
-// Handle text messages for multi-step conversations
-bot.on("text", async (msg) => {
-  const chatId = msg.chat.id
-  const text = msg.text
+    const blockchain = blockchainMsg.text.trim().toLowerCase()
 
-  // Ignore commands
-  if (text.startsWith("/")) {
-    return
-  }
+    bot.sendMessage(chatId, "Please enter 1-5 token addresses, separated by spaces:")
 
-  // Check if we have an ongoing conversation with this user
-  if (userConversations[chatId]) {
-    const conversation = userConversations[chatId]
+    bot.once("text", async (tokenMsg) => {
+      if (tokenMsg.text.startsWith("/")) {
+        return // Ignore if it's a command
+      }
 
-    if (conversation.state === "awaiting_blockchain") {
-      // Save the blockchain and ask for token addresses
-      conversation.blockchain = text.trim().toLowerCase()
-      conversation.state = "awaiting_tokens"
-      
-      bot.sendMessage(chatId, "Please enter 1-5 token addresses, separated by spaces:")
-    } 
-    else if (conversation.state === "awaiting_tokens") {
-      // Process token addresses
-      const addresses = text.split(" ")
+      const addresses = tokenMsg.text.split(" ")
       if (addresses.length < 1 || addresses.length > 5) {
         bot.sendMessage(chatId, "Please enter between 1 and 5 token addresses.")
         return
       }
 
-      // Prepare data for the query
-      const queryData = {
-        blockchain: conversation.blockchain,
-        tokens: addresses
+      // Fill remaining slots with "NULL"
+      const filledAddresses = [...addresses]
+      while (filledAddresses.length < 5) {
+        filledAddresses.push("NULL")
       }
-
-      // Clear the conversation state
-      delete userConversations[chatId]
 
       bot.sendMessage(chatId, "Processing your EVM Cabal request. This may take a few minutes, please be patient...")
 
-      // Add to query queue
-      queryQueue.push({ chatId, type: "evmcabal", data: queryData })
+      queryQueue.push({ chatId, type: "evmcabal", data: { addresses: filledAddresses, blockchain } })
       if (!isProcessingQueue) {
         processQueue()
       }
-    }
-  }
+    })
+  })
 })
 
 async function processQueue() {
@@ -247,7 +249,7 @@ async function processQueue() {
     } else if (type === "walletpnl") {
       result = await queryDuneWalletPNL(data)
     } else if (type === "evmcabal") {
-      result = await queryDuneEVMCabal(data)
+      result = await queryDuneEVMCabal(data.addresses, data.blockchain)
     }
 
     if (result.length === 0) {
@@ -315,26 +317,16 @@ async function queryDuneWalletPNL(walletAddress) {
   return await executeDuneQuery("4184506", params)
 }
 
-// Updated function to query Dune for EVM Cabal with "NULL" string for empty slots
-async function queryDuneEVMCabal(data) {
-  const { blockchain, tokens } = data
-  
-  // Create parameters object
+async function queryDuneEVMCabal(addresses, blockchain) {
   const params = {
-    blockchain: blockchain
-  }
-  
-  // Add token parameters, filling unused slots with "NULL" as a string
-  for (let i = 0; i < 5; i++) {
-    if (i < tokens.length) {
-      params[`Token_${i + 1}`] = tokens[i]
-    } else {
-      params[`Token_${i + 1}`] = "NULL"  // Use "NULL" as a string instead of null
-    }
+    blockchain: blockchain,
   }
 
-  // Use the specific query ID for EVM Cabal
-  return await executeDuneQuery("4822759", params)
+  addresses.forEach((address, index) => {
+    params[`Token_${index + 1}`] = address
+  })
+
+  return await executeDuneQuery(process.env.EVM_QUERY_ID, params)
 }
 
 async function executeDuneQuery(queryId, params) {
@@ -402,37 +394,6 @@ async function executeDuneQuery(queryId, params) {
   }
 }
 
-// Simple health check server
-const server = http.createServer((req, res) => {
-  if (req.url === "/health") {
-    // Check if the bot is actually connected to Telegram
-    const isPolling = bot.isPolling && bot.isPolling();
-    
-    if (isPolling) {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ 
-        status: "OK", 
-        timestamp: new Date().toISOString(),
-        polling: true
-      }));
-    } else {
-      res.writeHead(503, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ 
-        status: "ERROR", 
-        message: "Bot is not polling",
-        timestamp: new Date().toISOString()
-      }));
-    }
-  } else {
-    res.writeHead(404, { "Content-Type": "text/plain" });
-    res.end("Not Found");
-  }
-})
-
-server.listen(PORT, () => {
-  console.log(`Health check server running on port ${PORT}`)
-})
-
 // Graceful shutdown
 process.on("SIGTERM", () => {
   console.log("SIGTERM signal received. Closing server...")
@@ -443,6 +404,36 @@ process.on("SIGTERM", () => {
   })
 })
 
+// Keep-alive mechanism
+let lastActivity = Date.now()
+const KEEP_ALIVE_INTERVAL = 60000 // 1 minute
+
+function updateActivity() {
+  lastActivity = Date.now()
+}
+
+// Update activity on bot events
+bot.on("message", updateActivity)
+bot.on("callback_query", updateActivity)
+
+// Check if bot is still active
+setInterval(() => {
+  const inactiveTime = Date.now() - lastActivity
+  console.log(`Bot inactive for ${Math.floor(inactiveTime / 1000)} seconds`)
+
+  // If inactive for more than 10 minutes, restart polling
+  if (inactiveTime > 600000) {
+    console.log("Bot inactive for too long. Restarting polling...")
+    bot.stopPolling().then(() => {
+      setTimeout(() => {
+        bot.startPolling()
+        console.log("Bot polling restarted due to inactivity")
+        updateActivity()
+      }, 5000)
+    })
+  }
+}, KEEP_ALIVE_INTERVAL)
+
 // Error handling for polling errors
 bot.on("polling_error", (error) => {
   console.log("Polling error:", error.message)
@@ -452,6 +443,7 @@ bot.on("polling_error", (error) => {
     setTimeout(() => {
       bot.startPolling()
       console.log("Cabal bot polling restarted...")
+      updateActivity()
     }, BOT_RESTART_DELAY)
   }
 })
@@ -478,63 +470,29 @@ const axiosWithBackoff = {
   post: (...args) => exponentialBackoff(() => axios.post(...args)),
 }
 
-// Add error handling for uncaught exceptions and unhandled rejections
-process.on('uncaughtException', (error) => {
-  console.error('Uncaught Exception:', error);
-  // Don't exit the process, just log the error
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-  // Don't exit the process, just log the error
-});
-
-// Keep-alive mechanism
-let lastActivity = Date.now();
-const KEEP_ALIVE_INTERVAL = 60000; // 1 minute
-
-function updateActivity() {
-  lastActivity = Date.now();
-}
-
-// Update activity on bot events
-bot.on('message', updateActivity);
-bot.on('callback_query', updateActivity);
-
-// Check if bot is still active
-setInterval(() => {
-  const inactiveTime = Date.now() - lastActivity;
-  console.log(`Bot inactive for ${Math.floor(inactiveTime/1000)} seconds`);
-  
-  // If inactive for more than 10 minutes, restart polling
-  if (inactiveTime > 600000) {
-    console.log("Bot inactive for too long. Restarting polling...");
-    bot.stopPolling().then(() => {
-      setTimeout(() => {
-        bot.startPolling();
-        console.log("Bot polling restarted due to inactivity");
-        updateActivity();
-      }, 5000);
-    });
-  }
-}, KEEP_ALIVE_INTERVAL);
-
 // Add a ping mechanism to keep the connection alive
-setInterval(() => {
-  console.log("Sending keep-alive ping...");
-  bot.getMe().then(me => {
-    console.log(`Bot ${me.username} is alive and well`);
-    updateActivity();
-  }).catch(error => {
-    console.error("Error in keep-alive ping:", error);
-    // If we can't reach Telegram, restart polling
-    bot.stopPolling();
-    setTimeout(() => {
-      bot.startPolling();
-      console.log("Bot polling restarted after failed ping");
-      updateActivity();
-    }, 5000);
-  });
-}, 5 * 60 * 1000); // Every 5 minutes
+setInterval(
+  () => {
+    console.log("Sending keep-alive ping...")
+    bot
+      .getMe()
+      .then((me) => {
+        console.log(`Bot ${me.username} is alive and well`)
+        updateActivity()
+      })
+      .catch((error) => {
+        console.error("Error in keep-alive ping:", error)
+        // If we can't reach Telegram, restart polling
+        bot.stopPolling()
+        setTimeout(() => {
+          bot.startPolling()
+          console.log("Bot polling restarted after failed ping")
+          updateActivity()
+        }, 5000)
+      })
+  },
+  5 * 60 * 1000,
+) // Every 5 minutes
 
-console.log("Cabal bot is created and polling started...");
+console.log("Cabal bot is created and polling started...")
+
