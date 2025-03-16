@@ -1,10 +1,10 @@
 import express from "express"
+import http from "http"
 import TelegramBot from "node-telegram-bot-api"
 import axios from "axios"
 import dotenv from "dotenv"
 import { stringify } from "csv-stringify/sync"
 import fs from "fs"
-import { setupHealthCheck } from "./health-check.js"
 
 dotenv.config()
 
@@ -17,9 +17,6 @@ const BOT_RESTART_DELAY = 10000 // 10 seconds
 const app = express()
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true })
 const PORT = process.env.PORT || 8000
-
-// Setup health check with reference to the bot
-const server = setupHealthCheck(PORT, bot)
 
 async function isAuthorizedUser(userId) {
   try {
@@ -125,14 +122,6 @@ bot.onText(/\/walletpnl/, async (msg) => {
       processQueue()
     }
   })
-})
-
-// Add this new command handler after your other command handlers (like /start, /cabal, etc.)
-
-bot.onText(/\/checkgroupid/, (msg) => {
-  const chatId = msg.chat.id
-  bot.sendMessage(chatId, `This group's ID is: ${chatId}`)
-  console.log(`Group ID check requested: ${chatId}, chat type: ${msg.chat.type}`)
 })
 
 async function processQueue() {
@@ -282,6 +271,21 @@ async function executeDuneQuery(queryId, params) {
   }
 }
 
+// Simple health check server
+const server = http.createServer((req, res) => {
+  if (req.url === "/health") {
+    res.writeHead(200, { "Content-Type": "text/plain" })
+    res.end("OK")
+  } else {
+    res.writeHead(404, { "Content-Type": "text/plain" })
+    res.end("Not Found")
+  }
+})
+
+server.listen(PORT, () => {
+  console.log(`Health check server running on port ${PORT}`)
+})
+
 // Graceful shutdown
 process.on("SIGTERM", () => {
   console.log("SIGTERM signal received. Closing server...")
@@ -292,36 +296,6 @@ process.on("SIGTERM", () => {
   })
 })
 
-// Keep-alive mechanism
-let lastActivity = Date.now()
-const KEEP_ALIVE_INTERVAL = 60000 // 1 minute
-
-function updateActivity() {
-  lastActivity = Date.now()
-}
-
-// Update activity on bot events
-bot.on("message", updateActivity)
-bot.on("callback_query", updateActivity)
-
-// Check if bot is still active
-setInterval(() => {
-  const inactiveTime = Date.now() - lastActivity
-  console.log(`Bot inactive for ${Math.floor(inactiveTime / 1000)} seconds`)
-
-  // If inactive for more than 10 minutes, restart polling
-  if (inactiveTime > 600000) {
-    console.log("Bot inactive for too long. Restarting polling...")
-    bot.stopPolling().then(() => {
-      setTimeout(() => {
-        bot.startPolling()
-        console.log("Bot polling restarted due to inactivity")
-        updateActivity()
-      }, 5000)
-    })
-  }
-}, KEEP_ALIVE_INTERVAL)
-
 // Error handling for polling errors
 bot.on("polling_error", (error) => {
   console.log("Polling error:", error.message)
@@ -331,7 +305,6 @@ bot.on("polling_error", (error) => {
     setTimeout(() => {
       bot.startPolling()
       console.log("Cabal bot polling restarted...")
-      updateActivity()
     }, BOT_RESTART_DELAY)
   }
 })
@@ -358,29 +331,63 @@ const axiosWithBackoff = {
   post: (...args) => exponentialBackoff(() => axios.post(...args)),
 }
 
+// Add error handling for uncaught exceptions and unhandled rejections
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+  // Don't exit the process, just log the error
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  // Don't exit the process, just log the error
+});
+
+// Keep-alive mechanism
+let lastActivity = Date.now();
+const KEEP_ALIVE_INTERVAL = 60000; // 1 minute
+
+function updateActivity() {
+  lastActivity = Date.now();
+}
+
+// Update activity on bot events
+bot.on('message', updateActivity);
+bot.on('callback_query', updateActivity);
+
+// Check if bot is still active
+setInterval(() => {
+  const inactiveTime = Date.now() - lastActivity;
+  console.log(`Bot inactive for ${Math.floor(inactiveTime/1000)} seconds`);
+  
+  // If inactive for more than 10 minutes, restart polling
+  if (inactiveTime > 600000) {
+    console.log("Bot inactive for too long. Restarting polling...");
+    bot.stopPolling().then(() => {
+      setTimeout(() => {
+        bot.startPolling();
+        console.log("Bot polling restarted due to inactivity");
+        updateActivity();
+      }, 5000);
+    });
+  }
+}, KEEP_ALIVE_INTERVAL);
+
 // Add a ping mechanism to keep the connection alive
-setInterval(
-  () => {
-    console.log("Sending keep-alive ping...")
-    bot
-      .getMe()
-      .then((me) => {
-        console.log(`Bot ${me.username} is alive and well`)
-        updateActivity()
-      })
-      .catch((error) => {
-        console.error("Error in keep-alive ping:", error)
-        // If we can't reach Telegram, restart polling
-        bot.stopPolling()
-        setTimeout(() => {
-          bot.startPolling()
-          console.log("Bot polling restarted after failed ping")
-          updateActivity()
-        }, 5000)
-      })
-  },
-  5 * 60 * 1000,
-) // Every 5 minutes
+setInterval(() => {
+  console.log("Sending keep-alive ping...");
+  bot.getMe().then(me => {
+    console.log(`Bot ${me.username} is alive and well`);
+    updateActivity();
+  }).catch(error => {
+    console.error("Error in keep-alive ping:", error);
+    // If we can't reach Telegram, restart polling
+    bot.stopPolling();
+    setTimeout(() => {
+      bot.startPolling();
+      console.log("Bot polling restarted after failed ping");
+      updateActivity();
+    }, 5000);
+  });
+}, 5 * 60 * 1000); // Every 5 minutes
 
 console.log("Cabal bot is created and polling started...")
-
