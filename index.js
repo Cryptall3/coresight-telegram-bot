@@ -470,4 +470,20 @@ setInterval(() => {
 
 // Add a ping mechanism to keep the connection alive
 setInterval(() => {
-  conso
+  console.log("Sending keep-alive ping...");
+  bot.getMe().then(me => {
+    console.log(`Bot ${me.username} is alive and well`);
+    updateActivity();
+  }).catch(error => {
+    console.error("Error in keep-alive ping:", error);
+    // If we can't reach Telegram, restart polling
+    bot.stopPolling();
+    setTimeout(() => {
+      bot.startPolling();
+      console.log("Bot polling restarted after failed ping");
+      updateActivity();
+    }, 5000);
+  });
+}, 5 * 60 * 1000); // Every 5 minutes
+
+console.log("Cabal bot is created and polling started...");
