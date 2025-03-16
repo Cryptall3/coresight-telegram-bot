@@ -20,6 +20,9 @@ const app = express()
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true })
 const PORT = process.env.PORT || 8000
 
+// Store user conversation state
+const userConversations = {}
+
 async function isAuthorizedUser(userId) {
   try {
     const chatMember = await bot.getChatMember(AUTHORIZED_GROUP_ID, userId)
@@ -155,7 +158,7 @@ bot.onText(/\/walletpnl/, async (msg) => {
   })
 })
 
-// EVM Cabal command handler
+// EVM Cabal command handler - updated with blockchain selection
 bot.onText(/\/EVMCabal/, async (msg) => {
   const chatId = msg.chat.id
   const userId = msg.from.id
@@ -169,26 +172,63 @@ bot.onText(/\/EVMCabal/, async (msg) => {
     return
   }
 
-  bot.sendMessage(chatId, "Please enter 1-5 Ethereum token addresses, separated by spaces:")
+  // Initialize conversation state
+  userConversations[chatId] = {
+    state: "awaiting_blockchain",
+    userId: userId
+  }
 
-  bot.once("text", async (tokenMsg) => {
-    if (tokenMsg.text.startsWith("/")) {
-      return // Ignore if it's a command
+  // Ask for blockchain first
+  bot.sendMessage(chatId, "What blockchain do you want to query on? (e.g., ethereum, arbitrum, optimism, etc.)")
+})
+
+// Handle text messages for multi-step conversations
+bot.on("text", async (msg) => {
+  const chatId = msg.chat.id
+  const text = msg.text
+
+  // Ignore commands
+  if (text.startsWith("/")) {
+    return
+  }
+
+  // Check if we have an ongoing conversation with this user
+  if (userConversations[chatId]) {
+    const conversation = userConversations[chatId]
+
+    if (conversation.state === "awaiting_blockchain") {
+      // Save the blockchain and ask for token addresses
+      conversation.blockchain = text.trim().toLowerCase()
+      conversation.state = "awaiting_tokens"
+      
+      bot.sendMessage(chatId, "Please enter 1-5 token addresses, separated by spaces:")
+    } 
+    else if (conversation.state === "awaiting_tokens") {
+      // Process token addresses
+      const addresses = text.split(" ")
+      if (addresses.length < 1 || addresses.length > 5) {
+        bot.sendMessage(chatId, "Please enter between 1 and 5 token addresses.")
+        return
+      }
+
+      // Prepare data for the query
+      const queryData = {
+        blockchain: conversation.blockchain,
+        tokens: addresses
+      }
+
+      // Clear the conversation state
+      delete userConversations[chatId]
+
+      bot.sendMessage(chatId, "Processing your EVM Cabal request. This may take a few minutes, please be patient...")
+
+      // Add to query queue
+      queryQueue.push({ chatId, type: "evmcabal", data: queryData })
+      if (!isProcessingQueue) {
+        processQueue()
+      }
     }
-
-    const addresses = tokenMsg.text.split(" ")
-    if (addresses.length < 1 || addresses.length > 5) {
-      bot.sendMessage(chatId, "Please enter between 1 and 5 token addresses.")
-      return
-    }
-
-    bot.sendMessage(chatId, "Processing your EVM Cabal request. This may take a few minutes, please be patient...")
-
-    queryQueue.push({ chatId, type: "evmcabal", data: addresses })
-    if (!isProcessingQueue) {
-      processQueue()
-    }
-  })
+  }
 })
 
 async function processQueue() {
@@ -275,15 +315,26 @@ async function queryDuneWalletPNL(walletAddress) {
   return await executeDuneQuery("4184506", params)
 }
 
-// Add this function to query Dune for EVM Cabal
-async function queryDuneEVMCabal(addresses) {
-  const params = {}
-  addresses.forEach((address, index) => {
-    params[`Token_${index + 1}`] = address
-  })
+// Updated function to query Dune for EVM Cabal
+async function queryDuneEVMCabal(data) {
+  const { blockchain, tokens } = data
+  
+  // Create parameters object
+  const params = {
+    blockchain: blockchain
+  }
+  
+  // Add token parameters, filling unused slots with NULL
+  for (let i = 0; i < 5; i++) {
+    if (i < tokens.length) {
+      params[`Token_${i + 1}`] = tokens[i]
+    } else {
+      params[`Token_${i + 1}`] = null
+    }
+  }
 
-  // Replace with your actual Dune query ID for EVM Cabal
-  return await executeDuneQuery(process.env.EVM_QUERY_ID, params)
+  // Use the specific query ID for EVM Cabal
+  return await executeDuneQuery("4822759", params)
 }
 
 async function executeDuneQuery(queryId, params) {
