@@ -164,7 +164,7 @@ bot.onText(/\/EVMCabal/, async (msg) => {
   if (!(await isAuthorizedForPremium(userId))) {
     bot.sendMessage(
       chatId,
-      "Sorry, you are not authorized to use the EVM Cabal command. Please join our premium group to get access."
+      "You need to purchase a CORESIGHT premium plan to use this command!"
     )
     return
   }
@@ -470,20 +470,4 @@ setInterval(() => {
 
 // Add a ping mechanism to keep the connection alive
 setInterval(() => {
-  console.log("Sending keep-alive ping...");
-  bot.getMe().then(me => {
-    console.log(`Bot ${me.username} is alive and well`);
-    updateActivity();
-  }).catch(error => {
-    console.error("Error in keep-alive ping:", error);
-    // If we can't reach Telegram, restart polling
-    bot.stopPolling();
-    setTimeout(() => {
-      bot.startPolling();
-      console.log("Bot polling restarted after failed ping");
-      updateActivity();
-    }, 5000);
-  });
-}, 5 * 60 * 1000); // Every 5 minutes
-
-console.log("Cabal bot is created and polling started...")
+  conso
