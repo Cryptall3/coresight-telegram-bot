@@ -13,8 +13,8 @@ const DUNE_POLL_INTERVAL = 10000 // 10 seconds
 const DUNE_MAX_RETRIES = 30
 const DUNE_TIMEOUT = 600000 // 10 minutes
 const BOT_RESTART_DELAY = 10000 // 10 seconds
-// Define the authorized group ID for the EVM Cabal command
-const EVM_CABAL_GROUP_ID = process.env.EVM_CABAL_GROUP_ID || AUTHORIZED_GROUP_ID
+// Define the authorized group ID for premium features
+const PREMIUM_GROUP_ID = process.env.PREMIUM_GROUP_ID || AUTHORIZED_GROUP_ID
 
 const app = express()
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true })
@@ -30,13 +30,13 @@ async function isAuthorizedUser(userId) {
   }
 }
 
-// Check if a user is authorized for the EVM Cabal command
-async function isAuthorizedForEVMCabal(userId) {
+// Check if a user is authorized for premium features
+async function isAuthorizedForPremium(userId) {
   try {
-    const chatMember = await bot.getChatMember(EVM_CABAL_GROUP_ID, userId)
+    const chatMember = await bot.getChatMember(PREMIUM_GROUP_ID, userId)
     return ["creator", "administrator", "member"].includes(chatMember.status)
   } catch (error) {
-    console.error(`Error checking EVM Cabal group membership for user ${userId}:`, error)
+    console.error(`Error checking premium group membership for user ${userId}:`, error)
     return false
   }
 }
@@ -161,10 +161,10 @@ bot.onText(/\/EVMCabal/, async (msg) => {
   const userId = msg.from.id
 
   // Check if user is authorized
-  if (!(await isAuthorizedForEVMCabal(userId))) {
+  if (!(await isAuthorizedForPremium(userId))) {
     bot.sendMessage(
       chatId,
-      "Sorry, you are not authorized to use the EVM Cabal command. Please join our authorized group to get access."
+      "Sorry, you are not authorized to use the EVM Cabal command. Please join our premium group to get access."
     )
     return
   }
