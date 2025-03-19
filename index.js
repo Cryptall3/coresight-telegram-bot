@@ -252,6 +252,14 @@ bot.onText(/\/evmcabal/, async (msg) => {
 
 // New function to format wallet PnL data as text
 function formatWalletPnLAsText(data) {
+  // Check if we have data
+  if (!data || data.length === 0) {
+    return "No data available for this wallet"
+  }
+
+  // Get the wallet address from the query parameters
+  const walletAddress = data[0]?.wallet_address || "Unknown"
+
   // Calculate totals
   let totalBuys = 0
   let totalSells = 0
@@ -259,24 +267,27 @@ function formatWalletPnLAsText(data) {
   let totalBuysUsd = 0
   let totalSellsUsd = 0
   let totalProfitUsd = 0
-  let totalProfitPercentage = 0
 
   // Process each day's data
   data.forEach((day) => {
-    totalBuys += Number.parseInt(day.buys_today || 0)
-    totalSells += Number.parseInt(day.sells_today || 0)
-    totalTrades += Number.parseInt(day.trades_today || 0)
-    totalBuysUsd += Number.parseFloat(day.buy_volume_usd || 0)
-    totalSellsUsd += Number.parseFloat(day.sell_volume_usd || 0)
-    totalProfitUsd += Number.parseFloat(day.daily_profit_usd || 0)
+    // Make sure we're accessing the correct property names from the API response
+    totalBuys += Number(day.buys_today || 0)
+    totalSells += Number(day.sells_today || 0)
+    totalTrades += Number(day.trades_today || 0)
+    totalBuysUsd += Number(day.buy_volume_usd || 0)
+    totalSellsUsd += Number(day.sell_volume_usd || 0)
+    totalProfitUsd += Number(day.daily_profit_usd || 0)
   })
 
   // Calculate average profit percentage
-  totalProfitPercentage = totalBuysUsd > 0 ? (totalProfitUsd / totalBuysUsd) * 100 : 0
+  const totalProfitPercentage = totalBuysUsd > 0 ? (totalProfitUsd / totalBuysUsd) * 100 : 0
+
+  // For debugging, log the first data item to see its structure
+  console.log("Sample wallet PnL data item:", JSON.stringify(data[0]))
 
   // Format the message
   const message = `WALLET 7D PnL
-trader👨🏼‍🦰: ${data[0]?.wallet_address || "Unknown"}
+trader👨🏼‍🦰: ${walletAddress}
 
 buys count🟩: ${totalBuys}
 
@@ -378,12 +389,19 @@ async function queryDune(addresses) {
   return await executeDuneQuery(process.env.QUERY_ID, params)
 }
 
+// Also update the queryDuneWalletPNL function to include the wallet address in the result
 async function queryDuneWalletPNL(walletAddress) {
   const params = {
     wallet_address: walletAddress,
   }
 
-  return await executeDuneQuery("4184506", params)
+  const result = await executeDuneQuery("4184506", params)
+
+  // Add the wallet address to each result item for reference
+  return result.map((item) => ({
+    ...item,
+    wallet_address: walletAddress,
+  }))
 }
 
 async function queryDuneEVMCabal(addresses, blockchain) {
