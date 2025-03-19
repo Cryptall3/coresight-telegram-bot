@@ -19,6 +19,21 @@ const app = express()
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true })
 const PORT = process.env.PORT || 8000
 
+// Set up commands menu
+bot
+  .setMyCommands([
+    { command: "start", description: "Start the bot" },
+    { command: "cabal", description: "Find Solana token wallets" },
+    { command: "walletpnl", description: "Check 30-day wallet profit/loss" },
+    { command: "EVMCabal", description: "Find EVM token wallets" },
+  ])
+  .then(() => {
+    console.log("Bot commands menu set up successfully")
+  })
+  .catch((error) => {
+    console.error("Error setting up bot commands menu:", error)
+  })
+
 // Setup health check with reference to the bot
 const server = setupHealthCheck(PORT, bot)
 
@@ -277,24 +292,15 @@ function createCSVReport(data) {
     return "No data available"
   }
 
-  // Check if we have metadata with column_names in the first row
-  // This assumes the Dune API response structure is consistent
-  let orderedColumns = []
-
-  // If the data has a __metadata property with column_names, use that order
-  if (data[0] && data[0].__metadata && Array.isArray(data[0].__metadata.column_names)) {
-    orderedColumns = data[0].__metadata.column_names
-  } else {
-    // Otherwise, get all unique keys from the data
-    orderedColumns = [...new Set(data.flatMap(Object.keys))]
-  }
+  // Get all unique keys from the data
+  const allKeys = [...new Set(data.flatMap(Object.keys))]
 
   // Create header row
-  const header = orderedColumns
+  const header = allKeys
 
   // Create data rows
   const rows = data.map((item) =>
-    orderedColumns.map((key) => {
+    allKeys.map((key) => {
       if (typeof item[key] === "number") {
         // Format numbers to 2 decimal places
         return item[key].toFixed(2)
@@ -323,15 +329,7 @@ async function queryDuneWalletPNL(walletAddress) {
     wallet_address: walletAddress,
   }
 
-  const result = await executeDuneQuery("4184506", params)
-
-  // If we have results and metadata, preserve the column order
-  if (result && result.length > 0 && result.metadata && result.metadata.column_names) {
-    // Add metadata to the first row so createCSVReport can use it
-    result[0].__metadata = { column_names: result.metadata.column_names }
-  }
-
-  return result
+  return await executeDuneQuery("4184506", params)
 }
 
 async function queryDuneEVMCabal(addresses, blockchain) {
@@ -398,10 +396,7 @@ async function executeDuneQuery(queryId, params) {
           throw new Error("Unexpected response format from Dune API")
         }
 
-        // Return both the rows and the metadata
-        const result = resultResponse.data.result.rows
-        result.metadata = resultResponse.data.result.metadata
-        return result
+        return resultResponse.data.result.rows
       } else if (statusResponse.data.state === "QUERY_STATE_FAILED") {
         throw new Error(`Query execution failed: ${statusResponse.data.error || "Unknown error"}`)
       }
