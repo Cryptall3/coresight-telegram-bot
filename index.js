@@ -20,16 +20,19 @@ const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true })
 const PORT = process.env.PORT || 8000
 
 // Set up commands menu - Changed EVMCabal to evmcabal (lowercase)
-bot.setMyCommands([
-  { command: 'start', description: 'Start the bot' },
-  { command: 'cabal', description: 'Find Solana token wallets' },
-  { command: 'walletpnl', description: 'Check 30-day wallet profit/loss' },
-  { command: 'evmcabal', description: 'Find EVM token wallets' }
-]).then(() => {
-  console.log('Bot commands menu set up successfully');
-}).catch((error) => {
-  console.error('Error setting up bot commands menu:', error);
-});
+bot
+  .setMyCommands([
+    { command: "start", description: "Start the bot" },
+    { command: "cabal", description: "Find Solana token wallets" },
+    { command: "walletpnl", description: "Check 30-day wallet profit/loss" },
+    { command: "evmcabal", description: "Find EVM token wallets" },
+  ])
+  .then(() => {
+    console.log("Bot commands menu set up successfully")
+  })
+  .catch((error) => {
+    console.error("Error setting up bot commands menu:", error)
+  })
 
 // Setup health check with reference to the bot
 const server = setupHealthCheck(PORT, bot)
@@ -207,7 +210,7 @@ bot.onText(/\/evmcabal/, async (msg) => {
   // Update this message to list available blockchains
   bot.sendMessage(
     chatId,
-    "Choose a blockchain to query on. Available Chains are: bnb, base, ethereum, arbitrum, sei, berachain, fantom, polygon, avalanche_c, linea, blast, optimism, zksync"
+    "Choose a blockchain to query on. Available Chains are: bnb, base, ethereum, arbitrum, sei, berachain, fantom, polygon, avalanche_c, linea, blast, optimism, zksync",
   )
 
   // Rest of the command handler remains the same
@@ -217,9 +220,9 @@ bot.onText(/\/evmcabal/, async (msg) => {
     }
 
     const blockchain = blockchainMsg.text.trim().toLowerCase()
-    
+
     bot.sendMessage(chatId, "Please enter 1-5 token addresses, separated by spaces:")
-    
+
     bot.once("text", async (tokenMsg) => {
       if (tokenMsg.text.startsWith("/")) {
         return // Ignore if it's a command
@@ -247,6 +250,51 @@ bot.onText(/\/evmcabal/, async (msg) => {
   })
 })
 
+// New function to format wallet PnL data as text
+function formatWalletPnLAsText(data) {
+  // Calculate totals
+  let totalBuys = 0
+  let totalSells = 0
+  let totalTrades = 0
+  let totalBuysUsd = 0
+  let totalSellsUsd = 0
+  let totalProfitUsd = 0
+  let totalProfitPercentage = 0
+
+  // Process each day's data
+  data.forEach((day) => {
+    totalBuys += Number.parseInt(day.buys_today || 0)
+    totalSells += Number.parseInt(day.sells_today || 0)
+    totalTrades += Number.parseInt(day.trades_today || 0)
+    totalBuysUsd += Number.parseFloat(day.buy_volume_usd || 0)
+    totalSellsUsd += Number.parseFloat(day.sell_volume_usd || 0)
+    totalProfitUsd += Number.parseFloat(day.daily_profit_usd || 0)
+  })
+
+  // Calculate average profit percentage
+  totalProfitPercentage = totalBuysUsd > 0 ? (totalProfitUsd / totalBuysUsd) * 100 : 0
+
+  // Format the message
+  const message = `WALLET 7D PnL
+trader👨🏼‍🦰: ${data[0]?.wallet_address || "Unknown"}
+
+buys count🟩: ${totalBuys}
+
+sells count🔴: ${totalSells}
+
+total trades💱: ${totalTrades}
+
+Buys($)📈: $${totalBuysUsd.toFixed(2)}
+
+Sells($)📉: $${totalSellsUsd.toFixed(2)}
+
+Profit($)💸: $${totalProfitUsd.toFixed(2)}
+
+Profit(%)🏦: ${totalProfitPercentage.toFixed(2)}%`
+
+  return message
+}
+
 async function processQueue() {
   if (queryQueue.length === 0) {
     isProcessingQueue = false
@@ -269,14 +317,21 @@ async function processQueue() {
     if (result.length === 0) {
       bot.sendMessage(chatId, "No results found for the given input.")
     } else {
-      const csvContent = createCSVReport(result)
-      const fileName = `${type}_results_${Date.now()}.csv`
-      fs.writeFileSync(fileName, csvContent)
+      // Special handling for walletpnl - send as text instead of CSV
+      if (type === "walletpnl") {
+        const formattedText = formatWalletPnLAsText(result)
+        bot.sendMessage(chatId, formattedText)
+      } else {
+        // For other types, continue sending CSV files
+        const csvContent = createCSVReport(result)
+        const fileName = `${type}_results_${Date.now()}.csv`
+        fs.writeFileSync(fileName, csvContent)
 
-      await bot.sendDocument(chatId, fileName, { caption: `${type.toUpperCase()} Results` })
+        await bot.sendDocument(chatId, fileName, { caption: `${type.toUpperCase()} Results` })
 
-      // Delete the file after sending
-      fs.unlinkSync(fileName)
+        // Delete the file after sending
+        fs.unlinkSync(fileName)
+      }
     }
   } catch (error) {
     console.error("Dune API Error:", error)
@@ -333,9 +388,9 @@ async function queryDuneWalletPNL(walletAddress) {
 
 async function queryDuneEVMCabal(addresses, blockchain) {
   const params = {
-    blockchain: blockchain
+    blockchain: blockchain,
   }
-  
+
   addresses.forEach((address, index) => {
     params[`Token_${index + 1}`] = address
   })
