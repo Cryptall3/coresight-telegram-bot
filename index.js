@@ -277,15 +277,24 @@ function createCSVReport(data) {
     return "No data available"
   }
 
-  // Get all unique keys from the data
-  const allKeys = [...new Set(data.flatMap(Object.keys))]
+  // Check if we have metadata with column_names in the first row
+  // This assumes the Dune API response structure is consistent
+  let orderedColumns = []
+
+  // If the data has a __metadata property with column_names, use that order
+  if (data[0] && data[0].__metadata && Array.isArray(data[0].__metadata.column_names)) {
+    orderedColumns = data[0].__metadata.column_names
+  } else {
+    // Otherwise, get all unique keys from the data
+    orderedColumns = [...new Set(data.flatMap(Object.keys))]
+  }
 
   // Create header row
-  const header = allKeys
+  const header = orderedColumns
 
   // Create data rows
   const rows = data.map((item) =>
-    allKeys.map((key) => {
+    orderedColumns.map((key) => {
       if (typeof item[key] === "number") {
         // Format numbers to 2 decimal places
         return item[key].toFixed(2)
@@ -314,7 +323,15 @@ async function queryDuneWalletPNL(walletAddress) {
     wallet_address: walletAddress,
   }
 
-  return await executeDuneQuery("4184506", params)
+  const result = await executeDuneQuery("4184506", params)
+
+  // If we have results and metadata, preserve the column order
+  if (result && result.length > 0 && result.metadata && result.metadata.column_names) {
+    // Add metadata to the first row so createCSVReport can use it
+    result[0].__metadata = { column_names: result.metadata.column_names }
+  }
+
+  return result
 }
 
 async function queryDuneEVMCabal(addresses, blockchain) {
@@ -381,7 +398,10 @@ async function executeDuneQuery(queryId, params) {
           throw new Error("Unexpected response format from Dune API")
         }
 
-        return resultResponse.data.result.rows
+        // Return both the rows and the metadata
+        const result = resultResponse.data.result.rows
+        result.metadata = resultResponse.data.result.metadata
+        return result
       } else if (statusResponse.data.state === "QUERY_STATE_FAILED") {
         throw new Error(`Query execution failed: ${statusResponse.data.error || "Unknown error"}`)
       }
