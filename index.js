@@ -19,13 +19,14 @@ const app = express()
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true })
 const PORT = process.env.PORT || 8000
 
-// Set up commands menu - Changed EVMCabal to evmcabal (lowercase)
+// Set up commands menu - Added evmwalletpnl command
 bot
   .setMyCommands([
     { command: "start", description: "Start the bot" },
     { command: "cabal", description: "Find Solana token wallets" },
     { command: "walletpnl", description: "Check 30-day wallet profit/loss" },
     { command: "evmcabal", description: "Find EVM token wallets" },
+    { command: "evmwalletpnl", description: "Check EVM wallet profit/loss" },
   ])
   .then(() => {
     console.log("Bot commands menu set up successfully")
@@ -123,6 +124,7 @@ bot.onText(/\/start/, async (msg) => {
 To use the CABAL WALLET FINDER, enter /cabal
 To use the SOLANA WALLET PNL FINDER, enter /walletpnl
 To use the EVM CABAL WALLET FINDER, enter /evmcabal
+To use the EVM WALLET PNL FINDER, enter /evmwalletpnl
 
 More comands coming, stay tuned!😉`
 
@@ -250,7 +252,57 @@ bot.onText(/\/evmcabal/, async (msg) => {
   })
 })
 
-// New function to format wallet PnL data as text
+// New command for EVM Wallet PnL
+bot.onText(/\/evmwalletpnl/, async (msg) => {
+  const chatId = msg.chat.id
+  const userId = msg.from.id
+
+  // Check if user is authorized (using the same group as EVMCabal)
+  if (!(await isAuthorizedForEVMCabal(userId))) {
+    bot.sendMessage(
+      chatId,
+      "Sorry, you are not authorized to use the EVM Wallet PnL command. Please join our premium group to get access.",
+    )
+    return
+  }
+
+  // Prompt for blockchain selection
+  bot.sendMessage(
+    chatId,
+    "Choose a blockchain to query on. Available Chains are: bnb, base, ethereum, arbitrum, sei, berachain, fantom, polygon, avalanche_c, linea, blast, optimism, zksync",
+  )
+
+  bot.once("text", async (blockchainMsg) => {
+    if (blockchainMsg.text.startsWith("/")) {
+      return // Ignore if it's a command
+    }
+
+    const blockchain = blockchainMsg.text.trim().toLowerCase()
+
+    // Prompt for wallet address
+    bot.sendMessage(chatId, "Please enter a wallet address for the selected blockchain:")
+
+    bot.once("text", async (walletMsg) => {
+      if (walletMsg.text.startsWith("/")) {
+        return // Ignore if it's a command
+      }
+
+      const walletAddress = walletMsg.text.trim()
+
+      bot.sendMessage(
+        chatId,
+        "Processing your EVM Wallet PnL request. This may take a few minutes, please be patient...",
+      )
+
+      queryQueue.push({ chatId, type: "evmwalletpnl", data: { walletAddress, blockchain } })
+      if (!isProcessingQueue) {
+        processQueue()
+      }
+    })
+  })
+})
+
+// Function to format wallet PnL data as text
 function formatWalletPnLAsText(data) {
   // Check if we have data
   if (!data || data.length === 0) {
@@ -311,13 +363,15 @@ async function processQueue() {
       result = await queryDuneWalletPNL(data)
     } else if (type === "evmcabal") {
       result = await queryDuneEVMCabal(data.addresses, data.blockchain)
+    } else if (type === "evmwalletpnl") {
+      result = await queryDuneEVMWalletPNL(data.walletAddress, data.blockchain)
     }
 
     if (result.length === 0) {
       bot.sendMessage(chatId, "No results found for the given input.")
     } else {
-      // Special handling for walletpnl - send as text instead of CSV
-      if (type === "walletpnl") {
+      // Special handling for walletpnl and evmwalletpnl - send as text instead of CSV
+      if (type === "walletpnl" || type === "evmwalletpnl") {
         const formattedText = formatWalletPnLAsText(result)
         bot.sendMessage(chatId, formattedText)
       } else {
@@ -377,7 +431,6 @@ async function queryDune(addresses) {
   return await executeDuneQuery(process.env.QUERY_ID, params)
 }
 
-// Also update the queryDuneWalletPNL function to include the wallet address in the result
 async function queryDuneWalletPNL(walletAddress) {
   const params = {
     wallet_address: walletAddress,
@@ -402,6 +455,22 @@ async function queryDuneEVMCabal(addresses, blockchain) {
   })
 
   return await executeDuneQuery(process.env.EVM_QUERY_ID, params)
+}
+
+// New function for EVM Wallet PnL
+async function queryDuneEVMWalletPNL(walletAddress, blockchain) {
+  const params = {
+    wallet_address: walletAddress,
+    blockchain: blockchain,
+  }
+
+  const result = await executeDuneQuery("4873029", params)
+
+  // Add the wallet address to each result item for reference
+  return result.map((item) => ({
+    ...item,
+    wallet_address: walletAddress,
+  }))
 }
 
 async function executeDuneQuery(queryId, params) {
