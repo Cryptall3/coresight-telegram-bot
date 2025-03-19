@@ -19,20 +19,17 @@ const app = express()
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true })
 const PORT = process.env.PORT || 8000
 
-// Set up commands menu
-bot
-  .setMyCommands([
-    { command: "start", description: "Start the bot" },
-    { command: "cabal", description: "Find Solana token wallets" },
-    { command: "walletpnl", description: "Check 30-day wallet profit/loss" },
-    { command: "EVMCabal", description: "Find EVM token wallets" },
-  ])
-  .then(() => {
-    console.log("Bot commands menu set up successfully")
-  })
-  .catch((error) => {
-    console.error("Error setting up bot commands menu:", error)
-  })
+// Set up commands menu - Changed EVMCabal to evmcabal (lowercase)
+bot.setMyCommands([
+  { command: 'start', description: 'Start the bot' },
+  { command: 'cabal', description: 'Find Solana token wallets' },
+  { command: 'walletpnl', description: 'Check 30-day wallet profit/loss' },
+  { command: 'evmcabal', description: 'Find EVM token wallets' }
+]).then(() => {
+  console.log('Bot commands menu set up successfully');
+}).catch((error) => {
+  console.error('Error setting up bot commands menu:', error);
+});
 
 // Setup health check with reference to the bot
 const server = setupHealthCheck(PORT, bot)
@@ -117,13 +114,14 @@ bot.onText(/\/start/, async (msg) => {
     return
   }
 
-  const welcomeMessage = `Welcome to CORESIGHT! your gateway to deep insight and analysis using blockchain data!
+  // Updated welcome message with emoji and text changes
+  const welcomeMessage = `Welcome to CORESIGHT🔭! your gateway to deep insight and analysis using blockchain data!
 
 To use the CABAL WALLET FINDER, enter /cabal
-To use the 30D WALLET PNL FINDER, enter /walletpnl
-To use the EVM CABAL WALLET FINDER, enter /EVMCabal
+To use the SOLANA WALLET PNL FINDER, enter /walletpnl
+To use the EVM CABAL WALLET FINDER, enter /evmcabal
 
-More comands coming, stay tuned!`
+More comands coming, stay tuned!😉`
 
   bot.sendMessage(chatId, welcomeMessage)
 })
@@ -192,7 +190,8 @@ bot.onText(/\/walletpnl/, async (msg) => {
   })
 })
 
-bot.onText(/\/EVMCabal/, async (msg) => {
+// Changed from /EVMCabal to /evmcabal (lowercase)
+bot.onText(/\/evmcabal/, async (msg) => {
   const chatId = msg.chat.id
   const userId = msg.from.id
 
@@ -208,7 +207,7 @@ bot.onText(/\/EVMCabal/, async (msg) => {
   // Update this message to list available blockchains
   bot.sendMessage(
     chatId,
-    "Choose a blockchain to query on. Available Chains are: bnb, base, ethereum, arbitrum, sei, berachain, fantom, polygon, avalanche_c, linea, blast, optimism, zksync",
+    "Choose a blockchain to query on. Available Chains are: bnb, base, ethereum, arbitrum, sei, berachain, fantom, polygon, avalanche_c, linea, blast, optimism, zksync"
   )
 
   // Rest of the command handler remains the same
@@ -218,9 +217,9 @@ bot.onText(/\/EVMCabal/, async (msg) => {
     }
 
     const blockchain = blockchainMsg.text.trim().toLowerCase()
-
+    
     bot.sendMessage(chatId, "Please enter 1-5 token addresses, separated by spaces:")
-
+    
     bot.once("text", async (tokenMsg) => {
       if (tokenMsg.text.startsWith("/")) {
         return // Ignore if it's a command
@@ -334,9 +333,9 @@ async function queryDuneWalletPNL(walletAddress) {
 
 async function queryDuneEVMCabal(addresses, blockchain) {
   const params = {
-    blockchain: blockchain,
+    blockchain: blockchain
   }
-
+  
   addresses.forEach((address, index) => {
     params[`Token_${index + 1}`] = address
   })
