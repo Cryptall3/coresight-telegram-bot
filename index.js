@@ -257,51 +257,39 @@ function formatWalletPnLAsText(data) {
     return "No data available for this wallet"
   }
 
+  // Log the first data item to see its structure
+  console.log("Sample wallet PnL data item:", JSON.stringify(data[0]))
+
   // Get the wallet address from the query parameters
   const walletAddress = data[0]?.wallet_address || "Unknown"
 
-  // Calculate totals
-  let totalBuys = 0
-  let totalSells = 0
-  let totalTrades = 0
-  let totalBuysUsd = 0
-  let totalSellsUsd = 0
-  let totalProfitUsd = 0
-
-  // Process each day's data
-  data.forEach((day) => {
-    // Make sure we're accessing the correct property names from the API response
-    totalBuys += Number(day.buys_today || 0)
-    totalSells += Number(day.sells_today || 0)
-    totalTrades += Number(day.trades_today || 0)
-    totalBuysUsd += Number(day.buy_volume_usd || 0)
-    totalSellsUsd += Number(day.sell_volume_usd || 0)
-    totalProfitUsd += Number(day.daily_profit_usd || 0)
-  })
-
-  // Calculate average profit percentage
-  const totalProfitPercentage = totalBuysUsd > 0 ? (totalProfitUsd / totalBuysUsd) * 100 : 0
-
-  // For debugging, log the first data item to see its structure
-  console.log("Sample wallet PnL data item:", JSON.stringify(data[0]))
+  // Get the values directly from the first row of data
+  // Using the correct column names from the API response
+  const buysCount = data[0]?.["buys count"] || 0
+  const sellsCount = data[0]?.["sells count"] || 0
+  const totalTrades = data[0]?.["total trades"] || 0
+  const buysUsd = data[0]?.["Buys($)"] || 0
+  const sellsUsd = data[0]?.["Sells($)"] || 0
+  const profitUsd = data[0]?.["Profit($)"] || 0
+  const profitPercentage = data[0]?.["Profit(%)"] || 0
 
   // Format the message
   const message = `WALLET 7D PnL
 trader👨🏼‍🦰: ${walletAddress}
 
-buys count🟩: ${totalBuys}
+buys count🟩: ${buysCount}
 
-sells count🔴: ${totalSells}
+sells count🔴: ${sellsCount}
 
 total trades💱: ${totalTrades}
 
-Buys($)📈: $${totalBuysUsd.toFixed(2)}
+Buys($)📈: $${typeof buysUsd === "number" ? buysUsd.toFixed(2) : buysUsd}
 
-Sells($)📉: $${totalSellsUsd.toFixed(2)}
+Sells($)📉: $${typeof sellsUsd === "number" ? sellsUsd.toFixed(2) : sellsUsd}
 
-Profit($)💸: $${totalProfitUsd.toFixed(2)}
+Profit($)💸: $${typeof profitUsd === "number" ? profitUsd.toFixed(2) : profitUsd}
 
-Profit(%)🏦: ${totalProfitPercentage.toFixed(2)}%`
+Profit(%)🏦: ${typeof profitPercentage === "number" ? profitPercentage.toFixed(2) : profitPercentage}%`
 
   return message
 }
